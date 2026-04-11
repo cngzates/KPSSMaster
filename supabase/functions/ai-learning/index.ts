@@ -14,7 +14,16 @@ serve(async (req) => {
     const apiKey = Deno.env.get('ONSPACE_AI_API_KEY');
     const baseUrl = Deno.env.get('ONSPACE_AI_BASE_URL');
 
-    const { tip, konu, ders, kategori, kullanici_metni, gecmis_mesajlar } = await req.json();
+    const {
+      tip,
+      konu,
+      ders,
+      kategori,
+      kullanici_metni,
+      gecmis_mesajlar,
+      zorluk,
+      soru_sayisi,
+    } = await req.json();
 
     let systemPrompt = '';
     let userPrompt = '';
@@ -35,28 +44,37 @@ Sanki 10. sınıf öğrencisine anlatır gibi basit anlat. Türkçe yanıtla.`;
       systemPrompt = `Sen KPSS eğitmenisin. Aynı konuyu farklı bir açıdan ve farklı benzetmelerle anlat. Türkçe yanıtla.`;
       userPrompt = `${konu} konusunu farklı bir yaklaşımla, farklı örnekler kullanarak tekrar anlat.`;
     } else if (tip === 'soru_uret') {
-      systemPrompt = `Sen KPSS soru üreticisisin. ÖSYM formatında, gerçekçi sorular üretirsin.
-SADECE şu JSON formatında yanıt ver, başka metin ekleme:
+      const adet = soru_sayisi ?? 5;
+      const seviye = zorluk ?? 'Orta';
+
+      systemPrompt = `Sen KPSS soru üreticisisin. ÖSYM tarzı, özgün ve gerçekçi sorular üretirsin.
+Zorluk seviyesine sıkı sıkıya uy:
+- Kolay: Tanım ve temel bilgi soruları, doğrudan hatırlama
+- Orta: Kavram analizi, ilişki kurma, yorum gerektiren sorular
+- Zor: Karmaşık analiz, çok adımlı çıkarım, ince ayrım gerektiren sorular
+
+SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir metin ekleme, markdown kullanma:
 {
   "sorular": [
     {
       "id": "q1",
-      "soru": "Soru metni",
-      "siklar": ["A) ...", "B) ...", "C) ...", "D) ...", "E) ..."],
+      "soru": "Soru metni burada olacak",
+      "siklar": ["A) seçenek", "B) seçenek", "C) seçenek", "D) seçenek", "E) seçenek"],
       "dogru_cevap": "A",
-      "aciklama": "Kısa açıklama"
+      "aciklama": "Neden bu cevap doğru, kısa açıklama",
+      "zorluk": "${seviye}"
     }
   ]
 }`;
-      userPrompt = `${ders} dersi, ${konu} konusundan KPSS formatında 4 adet çoktan seçmeli soru üret. JSON formatında ver.`;
+      userPrompt = `${ders} dersi, "${konu}" konusundan KPSS formatında ${adet} adet ${seviye} zorlukta çoktan seçmeli soru üret. Her soru benzersiz ve özgün olsun, aynı fikri tekrarlama. JSON formatında ver.`;
     } else if (tip === 'yazi_analiz') {
       systemPrompt = `Sen KPSS eğitmenisin. Öğrencinin yazdığı metni analiz edersin.
-SADECE şu JSON formatında yanıt ver:
+SADECE şu JSON formatında yanıt ver, markdown kullanma:
 {
   "puan": 75,
-  "dogru_noktalar": ["...", "..."],
-  "eksikler": ["...", "..."],
-  "oneri": "Kısa tavsiye"
+  "dogru_noktalar": ["doğru ifade 1", "doğru ifade 2"],
+  "eksikler": ["eksik nokta 1", "eksik nokta 2"],
+  "oneri": "Kısa, yapıcı tavsiye cümlesi"
 }`;
       userPrompt = `Öğrenci ${konu} konusu hakkında şunu yazdı:\n"${kullanici_metni}"\n\nBu metni analiz et, doğru noktaları ve eksikleri belirt. JSON formatında ver.`;
     } else if (tip === 'chat') {

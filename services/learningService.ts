@@ -60,6 +60,39 @@ export async function miniSoruUret(konu: string, ders: string): Promise<MiniSoru
   }
 }
 
+export async function aiSoruUret(params: {
+  konu: string;
+  ders: string;
+  kategori?: string;
+  zorluk?: 'Kolay' | 'Orta' | 'Zor';
+  soru_sayisi?: number;
+}): Promise<MiniSoruData[]> {
+  const yanit = await aiIstek({
+    tip: 'soru_uret',
+    konu: params.konu,
+    ders: params.ders,
+    kategori: params.kategori,
+    zorluk: params.zorluk ?? 'Orta',
+    soru_sayisi: params.soru_sayisi ?? 5,
+  });
+  if (yanit.error || !yanit.content) return [];
+  try {
+    // JSON bloğunu bul ve ayrıştır
+    let jsonStr = yanit.content.trim();
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (jsonMatch) jsonStr = jsonMatch[0];
+    jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const parsed = JSON.parse(jsonStr);
+    return (parsed.sorular || []).map((s: MiniSoruData & { zorluk?: string }) => ({
+      ...s,
+      zorluk: s.zorluk || params.zorluk || 'Orta',
+    }));
+  } catch (e) {
+    console.error('aiSoruUret parse error:', e, yanit.content.slice(0, 200));
+    return [];
+  }
+}
+
 export async function yaziAnaliz(konu: string, kullanici_metni: string): Promise<{
   puan: number;
   dogru_noktalar: string[];
