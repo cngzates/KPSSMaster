@@ -1,16 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable, Animated
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 import { KATEGORILER } from '@/constants/data';
 import { useApp } from '@/hooks/useApp';
 import { useAuth } from '@/template';
 import { userStatsGetir } from '@/services/learningService';
+import {
+  bildirimIzniAl,
+  gunlukHatirlaticiKur,
+  streakMilestoneBildir,
+  bildirimDinleyiciEkle,
+  bildirimTiklaDinleyiciEkle,
+} from '@/services/notificationService';
 
 interface UserStats {
   xp: number;
@@ -28,50 +34,217 @@ interface GunlukGorev {
   icon: keyof typeof MaterialIcons.glyphMap;
 }
 
+// ─── In-App Toast Bildirimi ────────────────────────────────────
+interface ToastProps {
+  mesaj: string;
+  alt?: string;
+  gorünür: boolean;
+  onGizle: () => void;
+}
+
+function StreakToast({ mesaj, alt, gorünür, onGizle }: ToastProps) {
+  const slideAnim = useRef(new Animated.Value(-100)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (gorünür) {
+      Animated.parallel([
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 80, friction: 10 }),
+        Animated.timing(opacityAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+      ]).start();
+      const timer = setTimeout(() => {
+        Animated.parallel([
+          Animated.timing(slideAnim, { toValue: -100, duration: 300, useNativeDriver: true }),
+          Animated.timing(opacityAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        ]).start(() => onGizle());
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [gorünür]);
+
+  if (!gorünür) return null;
+  return (
+    <Animated.View style={[
+      toastStyles.container,
+      { transform: [{ translateY: slideAnim }], opacity: opacityAnim }
+    ]}>
+      <View style={toastStyles.ikon}>
+        <Text style={{ fontSize: 22 }}>🔥</Text>
+      </View>
+      <View style={toastStyles.bilgi}>
+        <Text style={toastStyles.mesaj}>{mesaj}</Text>
+        {alt ? <Text style={toastStyles.alt}>{alt}</Text> : null}
+      </View>
+      <Pressable onPress={onGizle} hitSlop={12}>
+        <MaterialIcons name="close" size={16} color={Colors.textMuted} />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+const toastStyles = StyleSheet.create({
+  container: {
+    position: 'absolute', top: 8, left: 16, right: 16, zIndex: 999,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.bgCard, borderRadius: Radius.lg,
+    padding: Spacing.md, borderWidth: 1.5, borderColor: Colors.warning + '60',
+    shadowColor: Colors.warning, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 12, elevation: 10,
+  },
+  ikon: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: Colors.warning + '20', alignItems: 'center', justifyContent: 'center',
+  },
+  bilgi: { flex: 1 },
+  mesaj: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  alt: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+});
+
+// ─── Seri Sıralama (Leaderboard) Kartı ───────────────────────
+const SERI_SIRALAMASI = [
+  { ad: 'Sen', seri: 0, ben: true },
+  { ad: 'Ahmet K.', seri: 12 },
+  { ad: 'Zeynep A.', seri: 9 },
+  { ad: 'Murat T.', seri: 7 },
+  { ad: 'Elif S.', seri: 5 },
+];
+
+function SeriSiralama({ benimSeri }: { benimSeri: number }) {
+  const liste = [
+    { ad: 'Sen', seri: benimSeri, ben: true },
+    { ad: 'Ahmet K.', seri: 12 },
+    { ad: 'Zeynep A.', seri: 9 },
+    { ad: 'Murat T.', seri: 7 },
+    { ad: 'Elif S.', seri: 5 },
+  ].sort((a, b) => b.seri - a.seri);
+
+  return (
+    <View style={siralama.kart}>
+      <View style={siralama.header}>
+        <MaterialIcons name="leaderboard" size={18} color={Colors.gold} />
+        <Text style={siralama.baslik}>Seri Sıralaması</Text>
+      </View>
+      {liste.map((item, i) => {
+        const siraEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        return (
+          <View
+            key={item.ad}
+            style={[siralama.satir, item.ben && siralama.benimSatir]}
+          >
+            <Text style={siralama.sira}>{siraEmoji}</Text>
+            <Text style={[siralama.ad, item.ben && siralama.benimAd]}>
+              {item.ad}{item.ben ? ' (Sen)' : ''}
+            </Text>
+            <View style={siralama.seriWrap}>
+              <Text style={siralama.ates}>🔥</Text>
+              <Text style={[siralama.seriSayi, item.ben && siralama.benimSeri]}>
+                {item.seri}
+              </Text>
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const siralama = StyleSheet.create({
+  kart: {
+    backgroundColor: Colors.bgCard, borderRadius: Radius.lg, padding: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border, marginBottom: Spacing.md,
+  },
+  header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, marginBottom: Spacing.sm },
+  baslik: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  satir: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
+    borderTopWidth: 1, borderTopColor: Colors.border,
+  },
+  benimSatir: {
+    backgroundColor: Colors.primary + '12', borderRadius: Radius.md,
+    marginHorizontal: -4, paddingHorizontal: 4, borderTopWidth: 0, marginTop: 4,
+    borderWidth: 1, borderColor: Colors.primary + '30',
+  },
+  sira: { width: 32, fontSize: FontSize.sm, textAlign: 'center' },
+  ad: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.medium },
+  benimAd: { color: Colors.primary, fontWeight: FontWeight.bold },
+  seriWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  ates: { fontSize: 14 },
+  seriSayi: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary, minWidth: 24, textAlign: 'right' },
+  benimSeri: { color: Colors.primary },
+});
+
+// ─── Ana Bileşen ────────────────────────────────────────────
 export default function AnaSayfa() {
   const router = useRouter();
   const { gunlukCozulen, gunlukHedef, aktifKategoriSec, kisiselTestBaslat, testSonuclari } = useApp();
   const { user } = useAuth();
   const [stats, setStats] = useState<UserStats>({ xp: 0, streak: 0, level: 1 });
-
-  // Pulse animation for "Bana Özel Test"
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const glowAnim = useRef(new Animated.Value(0.6)).current;
+  const [toast, setToast] = useState({ gorünür: false, mesaj: '', alt: '' });
+  const oncekiStreak = useRef(0);
 
   const ilerlemeYuzdesi = Math.min((gunlukCozulen / gunlukHedef) * 100, 100);
   const zayifAlanlar = KATEGORILER.sort((a, b) => a.basariYuzdesi - b.basariYuzdesi).slice(0, 2);
   const displayAd = user?.username || user?.email?.split('@')[0] || 'Öğrenci';
 
-  // Günlük gorevler
-  const dogruSayisi = testSonuclari.filter(s => s.dogru).length;
+  // Günlük görevler
   const gunlukGorevler: GunlukGorev[] = [
     { id: 'soru', label: '20 soru çöz', hedef: 20, mevcut: gunlukCozulen, icon: 'quiz' },
     { id: 'tekrar', label: '1 tekrar yap', hedef: 1, mevcut: 0, icon: 'edit-note' },
     { id: 'sinav', label: '1 mini sınav tamamla', hedef: 1, mevcut: 0, icon: 'emoji-events' },
   ];
 
+  // Bildirim sistemi kurulumu
+  useEffect(() => {
+    bildirimIzniAl().then(izin => {
+      if (izin) gunlukHatirlaticiKur(20, 0);
+    });
+
+    // Bildirim gelince in-app toast göster
+    const temizle1 = bildirimDinleyiciEkle((b) => {
+      const veri = b.request.content.data;
+      if (veri?.tip === 'streak_milestone') {
+        setToast({
+          gorünür: true,
+          mesaj: b.request.content.title ?? '',
+          alt: b.request.content.body ?? '',
+        });
+      }
+    });
+
+    // Bildirime tıklanınca profil sayfasına git
+    const temizle2 = bildirimTiklaDinleyiciEkle((response) => {
+      const veri = response.notification.request.content.data;
+      if (veri?.tip === 'streak_milestone' || veri?.tip === 'gunluk_hatirlat') {
+        router.push('/(tabs)/profil');
+      }
+    });
+
+    return () => { temizle1(); temizle2(); };
+  }, []);
+
+  // Streak değişince kontrol et
+  useEffect(() => {
+    if (stats.streak > 0 && stats.streak !== oncekiStreak.current) {
+      const yeni = stats.streak;
+      const eski = oncekiStreak.current;
+      oncekiStreak.current = yeni;
+
+      if (yeni > eski) {
+        // Günlük streak artışı — in-app toast
+        setToast({
+          gorünür: true,
+          mesaj: `🔥 ${yeni} Günlük Seri!`,
+          alt: yeni >= 7 ? 'İnanılmaz! Bu tempoyı koru!' : 'Çalışmaya devam et, harika gidiyorsun!',
+        });
+        // Milestone push bildirimi
+        streakMilestoneBildir(yeni);
+      }
+    }
+  }, [stats.streak]);
+
   useEffect(() => {
     if (user) loadStats();
   }, [user]);
-
-  useEffect(() => {
-    // Pulse animation
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.04, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
-      ])
-    );
-    const glow = Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, { toValue: 1, duration: 1200, useNativeDriver: true }),
-        Animated.timing(glowAnim, { toValue: 0.6, duration: 1200, useNativeDriver: true }),
-      ])
-    );
-    pulse.start();
-    glow.start();
-    return () => { pulse.stop(); glow.stop(); };
-  }, []);
 
   const loadStats = async () => {
     if (!user) return;
@@ -109,8 +282,16 @@ export default function AnaSayfa() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* In-App Toast */}
+      <StreakToast
+        mesaj={toast.mesaj}
+        alt={toast.alt}
+        gorünür={toast.gorünür}
+        onGizle={() => setToast(t => ({ ...t, gorünür: false }))}
+      />
+
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
+        {/* Header — animasyonsuz */}
         <View style={styles.header}>
           <View>
             <Text style={styles.appName}>KPSS Master</Text>
@@ -135,7 +316,7 @@ export default function AnaSayfa() {
                   <Text style={styles.xpDeger}>{stats.xp} XP</Text>
                 </View>
                 <View style={styles.xpBar}>
-                  <Animated.View style={[styles.xpFill, { width: `${xpProgress}%` }]} />
+                  <View style={[styles.xpFill, { width: `${xpProgress}%` }]} />
                 </View>
                 <Text style={styles.xpAlt}>
                   {XP_PER_LEVEL - (stats.xp % XP_PER_LEVEL)} XP sonraki seviye
@@ -145,7 +326,7 @@ export default function AnaSayfa() {
           </View>
         )}
 
-        {/* 🔥 Bugün Seni Neler Bekliyor */}
+        {/* Bugün Seni Neler Bekliyor */}
         <View style={styles.gorevKart}>
           <View style={styles.gorevHeader}>
             <Text style={styles.gorevEmoji}>🔥</Text>
@@ -184,7 +365,7 @@ export default function AnaSayfa() {
             <Text style={styles.hedefAdet}>{gunlukCozulen}/{gunlukHedef} soru</Text>
           </View>
           <View style={styles.progressBg}>
-            <Animated.View style={[styles.progressFill, { width: `${ilerlemeYuzdesi}%` }]} />
+            <View style={[styles.progressFill, { width: `${ilerlemeYuzdesi}%` }]} />
           </View>
           <Text style={styles.hedefAlt}>
             {gunlukHedef - gunlukCozulen > 0
@@ -193,7 +374,11 @@ export default function AnaSayfa() {
           </Text>
         </View>
 
-        {/* 🔥 Öğrenme Döngüsü — Core Feature */}
+        {/* Seri Sıralaması */}
+        <Text style={styles.bolumBaslik}>🏆 Seri Sıralaması</Text>
+        <SeriSiralama benimSeri={stats.streak} />
+
+        {/* Öğrenme Döngüsü */}
         <Pressable
           style={({ pressed }) => [styles.dongusuKart, pressed && { opacity: 0.9 }]}
           onPress={handleOgrenmeDongusu}
@@ -250,7 +435,7 @@ export default function AnaSayfa() {
           <MaterialIcons name="chevron-right" size={22} color={Colors.textSecondary} />
         </Pressable>
 
-        {/* Zayıf Alanlar — AI Koç Mesajı */}
+        {/* AI Koç Konuşuyor */}
         <View style={styles.aiKocKart}>
           <View style={styles.aiKocHeader}>
             <View style={styles.aiKocDot} />
@@ -309,21 +494,18 @@ export default function AnaSayfa() {
           <MaterialIcons name="chevron-right" size={20} color={Colors.gold} />
         </Pressable>
 
-        {/* Bana Özel Test — Glow Pulse */}
-        <Animated.View style={[styles.ozelTestGlow, { opacity: glowAnim }]} pointerEvents="none" />
-        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-          <Pressable
-            style={({ pressed }) => [styles.ozelTestBtn, pressed && { opacity: 0.85 }]}
-            onPress={() => { kisiselTestBaslat(); router.push({ pathname: '/soru', params: { mod: 'kisisel' } }); }}
-          >
-            <Text style={styles.ozelTestEmoji}>🚀</Text>
-            <View style={styles.ozelTestIcerik}>
-              <Text style={styles.ozelTestText}>Bana Özel Test Oluştur</Text>
-              <Text style={styles.ozelTestAlt}>AI senin zayıf konularına göre test hazırladı</Text>
-            </View>
-            <MaterialIcons name="arrow-forward" size={20} color="#FFFFFF" />
-          </Pressable>
-        </Animated.View>
+        {/* Bana Özel Test — animasyonsuz, sabit stil */}
+        <Pressable
+          style={({ pressed }) => [styles.ozelTestBtn, pressed && { opacity: 0.85 }]}
+          onPress={() => { kisiselTestBaslat(); router.push({ pathname: '/soru', params: { mod: 'kisisel' } }); }}
+        >
+          <Text style={styles.ozelTestEmoji}>🚀</Text>
+          <View style={styles.ozelTestIcerik}>
+            <Text style={styles.ozelTestText}>Bana Özel Test Oluştur</Text>
+            <Text style={styles.ozelTestAlt}>AI senin zayıf konularına göre test hazırladı</Text>
+          </View>
+          <MaterialIcons name="arrow-forward" size={20} color="#FFFFFF" />
+        </Pressable>
 
         <View style={{ height: Spacing.xl }} />
       </ScrollView>
@@ -334,15 +516,20 @@ export default function AnaSayfa() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
   scrollContent: { paddingHorizontal: Spacing.md, paddingTop: Spacing.md },
+
+  // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md },
   appName: { fontSize: FontSize.xxl, fontWeight: FontWeight.extrabold, color: Colors.textPrimary, letterSpacing: 0.5 },
   headerSub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 2 },
   streakBadge: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.bgCard,
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border, gap: 4,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.full,
+    borderWidth: 1, borderColor: Colors.border, gap: 4,
   },
   streakFire: { fontSize: 18 },
   streakText: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.gold },
+
+  // XP Kartı
   xpKart: {
     backgroundColor: Colors.bgCard, borderRadius: Radius.lg, padding: Spacing.md,
     marginBottom: Spacing.md, borderWidth: 1, borderColor: Colors.border,
@@ -361,6 +548,7 @@ const styles = StyleSheet.create({
   xpBar: { height: 8, backgroundColor: Colors.bgSurface, borderRadius: Radius.full, overflow: 'hidden', marginBottom: 4 },
   xpFill: { height: '100%', backgroundColor: Colors.gold, borderRadius: Radius.full },
   xpAlt: { fontSize: 10, color: Colors.textMuted },
+
   // Günlük Görevler
   gorevKart: {
     backgroundColor: Colors.bgCard, borderRadius: Radius.lg, padding: Spacing.md,
@@ -387,6 +575,7 @@ const styles = StyleSheet.create({
   },
   gorevTikText: { fontSize: FontSize.xs, color: Colors.success, fontWeight: FontWeight.bold },
   gorevSayac: { fontSize: FontSize.xs, color: Colors.textMuted },
+
   // Hedef
   hedefKart: {
     backgroundColor: Colors.bgCard, borderRadius: Radius.lg, padding: Spacing.md,
@@ -398,6 +587,7 @@ const styles = StyleSheet.create({
   progressBg: { height: 10, backgroundColor: Colors.bgSurface, borderRadius: Radius.full, overflow: 'hidden', marginBottom: Spacing.sm },
   progressFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: Radius.full },
   hedefAlt: { fontSize: FontSize.xs, color: Colors.textSecondary },
+
   // Döngü
   dongusuKart: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -418,7 +608,10 @@ const styles = StyleSheet.create({
   dongusuBadgeText: { fontSize: 9, fontWeight: FontWeight.bold, color: '#fff', letterSpacing: 0.5 },
   dongusuBaslik: { fontSize: FontSize.base, fontWeight: FontWeight.bold, color: Colors.textPrimary, marginBottom: 2 },
   dongusuAlt: { fontSize: FontSize.xs, color: Colors.textSecondary },
+
   bolumBaslik: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.textPrimary, marginBottom: Spacing.sm, marginTop: Spacing.xs },
+
+  // Hızlı Başla
   hizliRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
   hizliKart: { flex: 1, borderRadius: Radius.lg, padding: Spacing.md, minHeight: 110, justifyContent: 'flex-end' },
   hizliKartMavi: { backgroundColor: Colors.primary + '22', borderWidth: 1, borderColor: Colors.primary + '55' },
@@ -427,15 +620,22 @@ const styles = StyleSheet.create({
   hizliEmoji: { fontSize: 28, marginBottom: Spacing.xs },
   hizliKartBaslik: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.textPrimary },
   hizliKartAlt: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+
+  // Devam Et
   devamKart: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.bgCard,
-    borderRadius: Radius.lg, padding: Spacing.md, marginBottom: Spacing.lg, gap: Spacing.sm, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius.lg, padding: Spacing.md, marginBottom: Spacing.lg,
+    gap: Spacing.sm, borderWidth: 1, borderColor: Colors.border,
   },
-  devamIcon: { width: 48, height: 48, borderRadius: Radius.md, backgroundColor: Colors.primary + '18', alignItems: 'center', justifyContent: 'center' },
+  devamIcon: {
+    width: 48, height: 48, borderRadius: Radius.md,
+    backgroundColor: Colors.primary + '18', alignItems: 'center', justifyContent: 'center',
+  },
   devamBilgi: { flex: 1 },
   devamBaslik: { fontSize: FontSize.md, fontWeight: FontWeight.semibold, color: Colors.textPrimary },
   devamAlt: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 3 },
-  // AI Koç Konuşuyor
+
+  // AI Koç
   aiKocKart: {
     backgroundColor: Colors.primary + '10', borderRadius: Radius.lg, padding: Spacing.md,
     marginBottom: Spacing.md, borderWidth: 1, borderColor: Colors.primary + '30',
@@ -453,9 +653,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 8,
   },
   aiKocBtnText: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.primary },
+
+  // Zayıf Alanlar
   zayifKart: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.bgCard,
-    borderRadius: Radius.md, padding: Spacing.sm + 4, marginBottom: Spacing.sm, gap: Spacing.sm, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius.md, padding: Spacing.sm + 4, marginBottom: Spacing.sm,
+    gap: Spacing.sm, borderWidth: 1, borderColor: Colors.border,
   },
   zayifEmoji: { fontSize: 22 },
   zayifBilgi: { flex: 1 },
@@ -464,6 +667,7 @@ const styles = StyleSheet.create({
   zayifBarWrap: { width: 80 },
   zayifBarBg: { height: 6, backgroundColor: Colors.bgSurface, borderRadius: Radius.full, overflow: 'hidden' },
   zayifBarFill: { height: '100%', borderRadius: Radius.full },
+
   // Akıllı Başlat
   akilliKart: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
@@ -473,27 +677,15 @@ const styles = StyleSheet.create({
   akilliBilgi: { flex: 1 },
   akilliBaslik: { fontSize: FontSize.base, fontWeight: FontWeight.bold, color: Colors.gold },
   akilliAlt: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
-  // Bana Özel Test
-  ozelTestGlow: {
-    position: 'absolute', left: Spacing.md, right: Spacing.md,
-    height: 60, borderRadius: Radius.lg, marginTop: 8,
-    backgroundColor: Colors.primary,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 20,
-    elevation: 0,
-  },
+
+  // Bana Özel Test — sabit, animasyonsuz
   ozelTestBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: Colors.primary, borderRadius: Radius.lg,
     paddingVertical: 18, paddingHorizontal: Spacing.md,
     marginTop: Spacing.sm, gap: Spacing.sm,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 8,
+    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 12, elevation: 6,
   },
   ozelTestEmoji: { fontSize: 20 },
   ozelTestIcerik: { flex: 1 },
