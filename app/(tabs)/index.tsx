@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, Animated
+  View, Text, StyleSheet, ScrollView, Pressable, Animated, Modal
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 import { KATEGORILER } from '@/constants/data';
 import { useApp } from '@/hooks/useApp';
 import { useAuth } from '@/template';
-import { userStatsGetir } from '@/services/learningService';
+import { getSupabaseClient } from '@/template';
+import { userStatsGetir, userStatsGuncelle } from '@/services/learningService';
 import {
   bildirimIzniAl,
   gunlukHatirlaticiKur,
@@ -25,25 +27,26 @@ interface UserStats {
 }
 
 const XP_PER_LEVEL = 500;
+const GOREV_BONUS_XP = 100;
 
-interface GunlukGorev {
-  id: string;
-  label: string;
-  hedef: number;
-  mevcut: number;
-  icon: keyof typeof MaterialIcons.glyphMap;
+interface GunlukGorevDurumu {
+  soruSayisi: number;    // bugün çözülen soru sayısı
+  tekrarYapildi: boolean; // bugün tekrar/öğrenme döngüsü yapıldı mı
+  miniSinavYapildi: boolean; // bugün mini sınav tamamlandı mı
+  bonusVerildi: boolean;  // bugün bonus XP verildi mi
 }
 
-// ─── In-App Toast Bildirimi ────────────────────────────────────
+// ─── In-App Toast ────────────────────────────────────────────
 interface ToastProps {
   mesaj: string;
   alt?: string;
   gorünür: boolean;
   onGizle: () => void;
+  tip?: 'streak' | 'bonus';
 }
 
-function StreakToast({ mesaj, alt, gorünür, onGizle }: ToastProps) {
-  const slideAnim = useRef(new Animated.Value(-100)).current;
+function AppToast({ mesaj, alt, gorünür, onGizle, tip = 'streak' }: ToastProps) {
+  const slideAnim = useRef(new Animated.Value(-120)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -54,22 +57,26 @@ function StreakToast({ mesaj, alt, gorünür, onGizle }: ToastProps) {
       ]).start();
       const timer = setTimeout(() => {
         Animated.parallel([
-          Animated.timing(slideAnim, { toValue: -100, duration: 300, useNativeDriver: true }),
+          Animated.timing(slideAnim, { toValue: -120, duration: 300, useNativeDriver: true }),
           Animated.timing(opacityAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
         ]).start(() => onGizle());
-      }, 4000);
+      }, 4500);
       return () => clearTimeout(timer);
     }
   }, [gorünür]);
 
   if (!gorünür) return null;
+  const borderColor = tip === 'bonus' ? Colors.gold + '70' : Colors.warning + '60';
+  const iconBg = tip === 'bonus' ? Colors.gold + '20' : Colors.warning + '20';
+  const emoji = tip === 'bonus' ? '🎉' : '🔥';
+
   return (
     <Animated.View style={[
       toastStyles.container,
-      { transform: [{ translateY: slideAnim }], opacity: opacityAnim }
+      { borderColor, transform: [{ translateY: slideAnim }], opacity: opacityAnim }
     ]}>
-      <View style={toastStyles.ikon}>
-        <Text style={{ fontSize: 22 }}>🔥</Text>
+      <View style={[toastStyles.ikon, { backgroundColor: iconBg }]}>
+        <Text style={{ fontSize: 22 }}>{emoji}</Text>
       </View>
       <View style={toastStyles.bilgi}>
         <Text style={toastStyles.mesaj}>{mesaj}</Text>
@@ -87,29 +94,29 @@ const toastStyles = StyleSheet.create({
     position: 'absolute', top: 8, left: 16, right: 16, zIndex: 999,
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     backgroundColor: Colors.bgCard, borderRadius: Radius.lg,
-    padding: Spacing.md, borderWidth: 1.5, borderColor: Colors.warning + '60',
-    shadowColor: Colors.warning, shadowOffset: { width: 0, height: 4 },
+    padding: Spacing.md, borderWidth: 1.5,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3, shadowRadius: 12, elevation: 10,
   },
   ikon: {
     width: 42, height: 42, borderRadius: 21,
-    backgroundColor: Colors.warning + '20', alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
   },
   bilgi: { flex: 1 },
   mesaj: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary },
   alt: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
 });
 
-// ─── Seri Sıralama (Leaderboard) Kartı ───────────────────────
-const SERI_SIRALAMASI = [
-  { ad: 'Sen', seri: 0, ben: true },
-  { ad: 'Ahmet K.', seri: 12 },
-  { ad: 'Zeynep A.', seri: 9 },
-  { ad: 'Murat T.', seri: 7 },
-  { ad: 'Elif S.', seri: 5 },
-];
-
-function SeriSiralama({ benimSeri }: { benimSeri: number }) {
+// ─── Leaderboard Modal ────────────────────────────────────────
+function LeaderboardModal({
+  gorünür,
+  onKapat,
+  benimSeri,
+}: {
+  gorünür: boolean;
+  onKapat: () => void;
+  benimSeri: number;
+}) {
   const liste = [
     { ad: 'Sen', seri: benimSeri, ben: true },
     { ad: 'Ahmet K.', seri: 12 },
@@ -119,87 +126,206 @@ function SeriSiralama({ benimSeri }: { benimSeri: number }) {
   ].sort((a, b) => b.seri - a.seri);
 
   return (
-    <View style={siralama.kart}>
-      <View style={siralama.header}>
-        <MaterialIcons name="leaderboard" size={18} color={Colors.gold} />
-        <Text style={siralama.baslik}>Seri Sıralaması</Text>
-      </View>
-      {liste.map((item, i) => {
-        const siraEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-        return (
-          <View
-            key={item.ad}
-            style={[siralama.satir, item.ben && siralama.benimSatir]}
-          >
-            <Text style={siralama.sira}>{siraEmoji}</Text>
-            <Text style={[siralama.ad, item.ben && siralama.benimAd]}>
-              {item.ad}{item.ben ? ' (Sen)' : ''}
-            </Text>
-            <View style={siralama.seriWrap}>
-              <Text style={siralama.ates}>🔥</Text>
-              <Text style={[siralama.seriSayi, item.ben && siralama.benimSeri]}>
-                {item.seri}
-              </Text>
-            </View>
+    <Modal visible={gorünür} transparent animationType="slide" onRequestClose={onKapat}>
+      <Pressable style={lb.overlay} onPress={onKapat}>
+        <Pressable style={lb.sheet} onPress={() => {}}>
+          {/* Handle */}
+          <View style={lb.handle} />
+          <View style={lb.header}>
+            <MaterialIcons name="leaderboard" size={20} color={Colors.gold} />
+            <Text style={lb.baslik}>Seri Sıralaması</Text>
+            <Pressable onPress={onKapat} hitSlop={12}>
+              <MaterialIcons name="close" size={20} color={Colors.textMuted} />
+            </Pressable>
           </View>
-        );
-      })}
-    </View>
+          <Text style={lb.altBaslik}>Bu haftaki streak sıralaması</Text>
+
+          {liste.map((item, i) => {
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null;
+            return (
+              <View
+                key={item.ad}
+                style={[lb.satir, item.ben && lb.benimSatir]}
+              >
+                <View style={lb.siraWrap}>
+                  {medal
+                    ? <Text style={{ fontSize: 18 }}>{medal}</Text>
+                    : <Text style={lb.siraNo}>{i + 1}</Text>}
+                </View>
+                <View style={lb.kisiWrap}>
+                  <View style={[lb.avatar, item.ben && lb.benimAvatar]}>
+                    <Text style={lb.avatarText}>{item.ad.charAt(0)}</Text>
+                  </View>
+                  <Text style={[lb.ad, item.ben && lb.benimAd]}>
+                    {item.ad}{item.ben ? ' (Sen)' : ''}
+                  </Text>
+                </View>
+                <View style={lb.seriWrap}>
+                  <Text style={lb.ates}>🔥</Text>
+                  <Text style={[lb.seriSayi, item.ben && { color: Colors.primary }]}>
+                    {item.seri}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+
+          <View style={lb.bilgi}>
+            <MaterialIcons name="info-outline" size={13} color={Colors.textMuted} />
+            <Text style={lb.bilgiText}>Serin arttıkça sıralamada yükselirsin</Text>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
-const siralama = StyleSheet.create({
-  kart: {
-    backgroundColor: Colors.bgCard, borderRadius: Radius.lg, padding: Spacing.md,
-    borderWidth: 1, borderColor: Colors.border, marginBottom: Spacing.md,
+const lb = StyleSheet.create({
+  overlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
   },
-  header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, marginBottom: Spacing.sm },
-  baslik: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  sheet: {
+    backgroundColor: Colors.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: Spacing.md, paddingBottom: Spacing.xl,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  handle: {
+    width: 40, height: 4, backgroundColor: Colors.border,
+    borderRadius: 2, alignSelf: 'center', marginBottom: Spacing.md,
+  },
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    marginBottom: 4,
+  },
+  baslik: { flex: 1, fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  altBaslik: { fontSize: FontSize.xs, color: Colors.textMuted, marginBottom: Spacing.md },
   satir: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
-    borderTopWidth: 1, borderTopColor: Colors.border,
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 12,
+    borderTopWidth: 1, borderTopColor: Colors.border + '80', gap: Spacing.sm,
   },
   benimSatir: {
     backgroundColor: Colors.primary + '12', borderRadius: Radius.md,
-    marginHorizontal: -4, paddingHorizontal: 4, borderTopWidth: 0, marginTop: 4,
+    paddingHorizontal: Spacing.sm, borderTopWidth: 0, marginTop: 4,
     borderWidth: 1, borderColor: Colors.primary + '30',
   },
-  sira: { width: 32, fontSize: FontSize.sm, textAlign: 'center' },
-  ad: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.medium },
+  siraWrap: { width: 32, alignItems: 'center' },
+  siraNo: { fontSize: FontSize.base, fontWeight: FontWeight.bold, color: Colors.textMuted },
+  kisiWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  avatar: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: Colors.bgSurface, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  benimAvatar: { backgroundColor: Colors.primary + '25', borderColor: Colors.primary + '60' },
+  avatarText: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  ad: { fontSize: FontSize.base, fontWeight: FontWeight.medium, color: Colors.textSecondary },
   benimAd: { color: Colors.primary, fontWeight: FontWeight.bold },
-  seriWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  ates: { fontSize: 14 },
-  seriSayi: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary, minWidth: 24, textAlign: 'right' },
-  benimSeri: { color: Colors.primary },
+  seriWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  ates: { fontSize: 16 },
+  seriSayi: { fontSize: FontSize.lg, fontWeight: FontWeight.extrabold, color: Colors.textPrimary, minWidth: 28, textAlign: 'right' },
+  bilgi: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    marginTop: Spacing.md, paddingTop: Spacing.sm,
+    borderTopWidth: 1, borderTopColor: Colors.border,
+  },
+  bilgiText: { fontSize: FontSize.xs, color: Colors.textMuted },
 });
 
 // ─── Ana Bileşen ────────────────────────────────────────────
 export default function AnaSayfa() {
   const router = useRouter();
-  const { gunlukCozulen, gunlukHedef, aktifKategoriSec, kisiselTestBaslat, testSonuclari } = useApp();
+  const { gunlukCozulen, gunlukHedef, aktifKategoriSec, kisiselTestBaslat } = useApp();
   const { user } = useAuth();
   const [stats, setStats] = useState<UserStats>({ xp: 0, streak: 0, level: 1 });
-  const [toast, setToast] = useState({ gorünür: false, mesaj: '', alt: '' });
+  const [toast, setToast] = useState({ gorünür: false, mesaj: '', alt: '', tip: 'streak' as 'streak' | 'bonus' });
+  const [leaderboardAcik, setLeaderboardAcik] = useState(false);
   const oncekiStreak = useRef(0);
 
-  const ilerlemeYuzdesi = Math.min((gunlukCozulen / gunlukHedef) * 100, 100);
+  // Gerçek günlük görev durumu
+  const [gorevDurumu, setGorevDurumu] = useState<GunlukGorevDurumu>({
+    soruSayisi: 0,
+    tekrarYapildi: false,
+    miniSinavYapildi: false,
+    bonusVerildi: false,
+  });
+
   const zayifAlanlar = KATEGORILER.sort((a, b) => a.basariYuzdesi - b.basariYuzdesi).slice(0, 2);
   const displayAd = user?.username || user?.email?.split('@')[0] || 'Öğrenci';
 
-  // Günlük görevler
-  const gunlukGorevler: GunlukGorev[] = [
-    { id: 'soru', label: '20 soru çöz', hedef: 20, mevcut: gunlukCozulen, icon: 'quiz' },
-    { id: 'tekrar', label: '1 tekrar yap', hedef: 1, mevcut: 0, icon: 'edit-note' },
-    { id: 'sinav', label: '1 mini sınav tamamla', hedef: 1, mevcut: 0, icon: 'emoji-events' },
-  ];
+  // ─── Günlük Görev Verisi: Supabase ──────────────────────
+  const gunlukGorevYukle = useCallback(async () => {
+    if (!user) {
+      // Oturum açılmamışsa context'ten soru sayısını kullan
+      setGorevDurumu(prev => ({ ...prev, soruSayisi: gunlukCozulen }));
+      return;
+    }
 
-  // Bildirim sistemi kurulumu
+    const bugun = new Date();
+    bugun.setHours(0, 0, 0, 0);
+    const bugunISO = bugun.toISOString();
+
+    // Bonus daha önce verildi mi?
+    const bonusKey = `gorev_bonus_${user.id}_${bugun.toISOString().split('T')[0]}`;
+    const bonusVerildi = await AsyncStorage.getItem(bonusKey) === 'true';
+
+    try {
+      const supabase = getSupabaseClient();
+
+      // Paralel sorgu: bugünkü soru geçmişi + çalışma oturumları
+      const [soruRes, seansRes] = await Promise.all([
+        supabase
+          .from('soru_gecmisi')
+          .select('id', { count: 'exact', head: false })
+          .eq('user_id', user.id)
+          .gte('created_at', bugunISO),
+        supabase
+          .from('study_sessions')
+          .select('faz_tamamlandi, mini_sinav_skoru, tamamlandi')
+          .eq('user_id', user.id)
+          .gte('started_at', bugunISO),
+      ]);
+
+      const soruSayisi = soruRes.data?.length ?? 0;
+      const seanslar = seansRes.data ?? [];
+
+      // Tekrar: en az faz 4 tamamlanan oturum var mı (tekrar yazma fazı)
+      const tekrarYapildi = seanslar.some(s => (s.faz_tamamlandi ?? 0) >= 4);
+
+      // Mini sınav: mini_sinav_skoru dolu oturum var mı
+      const miniSinavYapildi = seanslar.some(s => s.mini_sinav_skoru !== null && s.mini_sinav_skoru !== undefined);
+
+      setGorevDurumu({ soruSayisi, tekrarYapildi, miniSinavYapildi, bonusVerildi });
+
+      // Tüm görevler tamamlandıysa ve bonus henüz verilmediyse XP ver
+      const soruTamamlandi = soruSayisi >= 20;
+      if (soruTamamlandi && tekrarYapildi && miniSinavYapildi && !bonusVerildi) {
+        await AsyncStorage.setItem(bonusKey, 'true');
+        const guncelStats = await userStatsGuncelle(user.id, GOREV_BONUS_XP);
+        if (guncelStats) {
+          setStats(prev => ({ ...prev, xp: guncelStats.xp, level: guncelStats.level }));
+        }
+        setGorevDurumu(prev => ({ ...prev, bonusVerildi: true }));
+        setToast({
+          gorünür: true,
+          mesaj: '🎉 Tüm Görevler Tamamlandı!',
+          alt: `+${GOREV_BONUS_XP} XP Bonus kazandın! Harika bir gün!`,
+          tip: 'bonus',
+        });
+      }
+    } catch (err) {
+      console.error('Günlük görev yükleme hatası:', err);
+      // Hata durumunda context verisini fallback yap
+      setGorevDurumu(prev => ({ ...prev, soruSayisi: gunlukCozulen }));
+    }
+  }, [user, gunlukCozulen]);
+
+  // Bildirim sistemi
   useEffect(() => {
     bildirimIzniAl().then(izin => {
       if (izin) gunlukHatirlaticiKur(20, 0);
     });
 
-    // Bildirim gelince in-app toast göster
     const temizle1 = bildirimDinleyiciEkle((b) => {
       const veri = b.request.content.data;
       if (veri?.tip === 'streak_milestone') {
@@ -207,11 +333,11 @@ export default function AnaSayfa() {
           gorünür: true,
           mesaj: b.request.content.title ?? '',
           alt: b.request.content.body ?? '',
+          tip: 'streak',
         });
       }
     });
 
-    // Bildirime tıklanınca profil sayfasına git
     const temizle2 = bildirimTiklaDinleyiciEkle((response) => {
       const veri = response.notification.request.content.data;
       if (veri?.tip === 'streak_milestone' || veri?.tip === 'gunluk_hatirlat') {
@@ -222,28 +348,29 @@ export default function AnaSayfa() {
     return () => { temizle1(); temizle2(); };
   }, []);
 
-  // Streak değişince kontrol et
+  // Streak değişince toast ve milestone
   useEffect(() => {
     if (stats.streak > 0 && stats.streak !== oncekiStreak.current) {
       const yeni = stats.streak;
       const eski = oncekiStreak.current;
       oncekiStreak.current = yeni;
-
       if (yeni > eski) {
-        // Günlük streak artışı — in-app toast
         setToast({
           gorünür: true,
           mesaj: `🔥 ${yeni} Günlük Seri!`,
           alt: yeni >= 7 ? 'İnanılmaz! Bu tempoyı koru!' : 'Çalışmaya devam et, harika gidiyorsun!',
+          tip: 'streak',
         });
-        // Milestone push bildirimi
         streakMilestoneBildir(yeni);
       }
     }
   }, [stats.streak]);
 
   useEffect(() => {
-    if (user) loadStats();
+    if (user) {
+      loadStats();
+      gunlukGorevYukle();
+    }
   }, [user]);
 
   const loadStats = async () => {
@@ -280,30 +407,97 @@ export default function AnaSayfa() {
 
   const xpProgress = (stats.xp % XP_PER_LEVEL) / XP_PER_LEVEL * 100;
 
+  // Görev hesaplamaları
+  const soruTamamlandi = gorevDurumu.soruSayisi >= 20;
+  const tekrarTamamlandi = gorevDurumu.tekrarYapildi;
+  const miniSinavTamamlandi = gorevDurumu.miniSinavYapildi;
+  const tumGorevlerTamamlandi = soruTamamlandi && tekrarTamamlandi && miniSinavTamamlandi;
+
+  const tamamlananGorevSayisi = [soruTamamlandi, tekrarTamamlandi, miniSinavTamamlandi].filter(Boolean).length;
+
+  const gunlukGorevler = [
+    {
+      id: 'soru',
+      label: '20 soru çöz',
+      hedef: 20,
+      mevcut: gorevDurumu.soruSayisi,
+      tamamlandi: soruTamamlandi,
+      icon: 'quiz' as keyof typeof MaterialIcons.glyphMap,
+      onPress: () => router.push({ pathname: '/soru', params: { kategoriId: 'turkce', mod: 'hizli' } }),
+    },
+    {
+      id: 'tekrar',
+      label: '1 öğrenme döngüsü yap',
+      hedef: 1,
+      mevcut: tekrarTamamlandi ? 1 : 0,
+      tamamlandi: tekrarTamamlandi,
+      icon: 'loop' as keyof typeof MaterialIcons.glyphMap,
+      onPress: handleOgrenmeDongusu,
+    },
+    {
+      id: 'sinav',
+      label: '1 mini sınav tamamla',
+      hedef: 1,
+      mevcut: miniSinavTamamlandi ? 1 : 0,
+      tamamlandi: miniSinavTamamlandi,
+      icon: 'emoji-events' as keyof typeof MaterialIcons.glyphMap,
+      onPress: handleOgrenmeDongusu,
+    },
+  ];
+
+  // İlerleme yüzdesi (bugünkü soru sayısına göre)
+  const ilerlemeYuzdesi = Math.min((gorevDurumu.soruSayisi / 20) * 100, 100);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* In-App Toast */}
-      <StreakToast
+      <AppToast
         mesaj={toast.mesaj}
         alt={toast.alt}
         gorünür={toast.gorünür}
+        tip={toast.tip}
         onGizle={() => setToast(t => ({ ...t, gorünür: false }))}
       />
 
+      {/* Leaderboard Modal */}
+      <LeaderboardModal
+        gorünür={leaderboardAcik}
+        onKapat={() => setLeaderboardAcik(false)}
+        benimSeri={stats.streak}
+      />
+
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Header — animasyonsuz */}
+
+        {/* ─── Header ────────────────────────────────────────── */}
         <View style={styles.header}>
-          <View>
+          <View style={styles.headerSol}>
             <Text style={styles.appName}>KPSS Master</Text>
             <Text style={styles.headerSub}>Merhaba, {displayAd} 👋</Text>
           </View>
-          <Pressable style={styles.streakBadge} onPress={() => router.push('/(tabs)/profil')}>
-            <Text style={styles.streakFire}>🔥</Text>
-            <Text style={styles.streakText}>{stats.streak}</Text>
-          </Pressable>
+          <View style={styles.headerIkonlar}>
+            {/* Leaderboard İkon */}
+            <Pressable
+              style={({ pressed }) => [styles.headerIconBtn, pressed && { opacity: 0.7 }]}
+              onPress={() => setLeaderboardAcik(true)}
+            >
+              <MaterialIcons name="leaderboard" size={20} color={Colors.gold} />
+              {/* Sıralama badge (streakten bağımsız) */}
+              <View style={styles.lbBadge}>
+                <Text style={styles.lbBadgeText}>🏆</Text>
+              </View>
+            </Pressable>
+            {/* Streak Badge */}
+            <Pressable
+              style={styles.streakBadge}
+              onPress={() => router.push('/(tabs)/profil')}
+            >
+              <Text style={styles.streakFire}>🔥</Text>
+              <Text style={styles.streakText}>{stats.streak}</Text>
+            </Pressable>
+          </View>
         </View>
 
-        {/* XP & Level Kartı */}
+        {/* ─── XP & Level ─────────────────────────────────── */}
         {user && (
           <View style={styles.xpKart}>
             <View style={styles.xpRow}>
@@ -326,59 +520,97 @@ export default function AnaSayfa() {
           </View>
         )}
 
-        {/* Bugün Seni Neler Bekliyor */}
-        <View style={styles.gorevKart}>
+        {/* ─── Günlük Görevler ─────────────────────────────── */}
+        <View style={[styles.gorevKart, tumGorevlerTamamlandi && styles.gorevKartTamamlandi]}>
           <View style={styles.gorevHeader}>
-            <Text style={styles.gorevEmoji}>🔥</Text>
-            <Text style={styles.gorevBaslik}>Bugün Seni Neler Bekliyor</Text>
+            <Text style={styles.gorevEmoji}>{tumGorevlerTamamlandi ? '🎉' : '📋'}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.gorevBaslik}>Bugün Seni Neler Bekliyor</Text>
+              {tumGorevlerTamamlandi && (
+                <Text style={styles.gorevTamamlandiAlt}>Tüm görevler tamamlandı! +{GOREV_BONUS_XP} XP</Text>
+              )}
+            </View>
+            {/* İlerleme göstergesi */}
+            <View style={styles.gorevSayacBadge}>
+              <Text style={[styles.gorevSayacText, { color: tumGorevlerTamamlandi ? Colors.success : Colors.primary }]}>
+                {tamamlananGorevSayisi}/3
+              </Text>
+            </View>
           </View>
-          {gunlukGorevler.map((gorev) => {
-            const tamamlandi = gorev.mevcut >= gorev.hedef;
-            return (
-              <View key={gorev.id} style={styles.gorevItem}>
-                <View style={[styles.gorevCheckCircle, tamamlandi && styles.gorevCheckDolu]}>
-                  {tamamlandi
-                    ? <MaterialIcons name="check" size={14} color="#fff" />
-                    : <MaterialIcons name={gorev.icon} size={14} color={Colors.textMuted} />}
-                </View>
-                <Text style={[styles.gorevLabel, tamamlandi && styles.gorevLabelTamamlandi]}>
-                  {gorev.label}
-                </Text>
-                {tamamlandi && (
-                  <View style={styles.gorevTikBadge}>
-                    <Text style={styles.gorevTikText}>✓</Text>
-                  </View>
-                )}
-                {!tamamlandi && gorev.hedef > 1 && (
-                  <Text style={styles.gorevSayac}>{gorev.mevcut}/{gorev.hedef}</Text>
-                )}
+
+          {/* Progress bar görev durumu için */}
+          <View style={styles.gorevProgressBg}>
+            <View style={[styles.gorevProgressFill, {
+              width: `${(tamamlananGorevSayisi / 3) * 100}%`,
+              backgroundColor: tumGorevlerTamamlandi ? Colors.success : Colors.primary,
+            }]} />
+          </View>
+
+          {gunlukGorevler.map((gorev) => (
+            <Pressable
+              key={gorev.id}
+              style={({ pressed }) => [
+                styles.gorevItem,
+                gorev.tamamlandi && styles.gorevItemTamamlandi,
+                pressed && !gorev.tamamlandi && { opacity: 0.7 },
+              ]}
+              onPress={gorev.tamamlandi ? undefined : gorev.onPress}
+            >
+              <View style={[styles.gorevCheckCircle, gorev.tamamlandi && styles.gorevCheckDolu]}>
+                {gorev.tamamlandi
+                  ? <MaterialIcons name="check" size={14} color="#fff" />
+                  : <MaterialIcons name={gorev.icon} size={14} color={Colors.textMuted} />}
               </View>
-            );
-          })}
+              <Text style={[styles.gorevLabel, gorev.tamamlandi && styles.gorevLabelTamamlandi]}>
+                {gorev.label}
+              </Text>
+              {gorev.tamamlandi ? (
+                <View style={styles.gorevTikBadge}>
+                  <Text style={styles.gorevTikText}>✓ Tamamlandı</Text>
+                </View>
+              ) : (
+                <>
+                  {gorev.id === 'soru' && (
+                    <Text style={styles.gorevSayac}>{gorev.mevcut}/20</Text>
+                  )}
+                  <MaterialIcons name="chevron-right" size={16} color={Colors.textMuted} />
+                </>
+              )}
+            </Pressable>
+          ))}
+
+          {/* Bonus bilgisi */}
+          {!tumGorevlerTamamlandi && (
+            <View style={styles.bonusBilgi}>
+              <MaterialIcons name="stars" size={14} color={Colors.gold} />
+              <Text style={styles.bonusBilgiText}>
+                Tümünü tamamla → +{GOREV_BONUS_XP} XP Bonus!
+              </Text>
+            </View>
+          )}
         </View>
 
-        {/* Günlük Hedef */}
+        {/* ─── Günlük Soru Hedefi ──────────────────────────── */}
         <View style={styles.hedefKart}>
           <View style={styles.hedefHeader}>
             <MaterialIcons name="flag" size={18} color={Colors.gold} />
-            <Text style={styles.hedefBaslik}>Bugünün Planı</Text>
-            <Text style={styles.hedefAdet}>{gunlukCozulen}/{gunlukHedef} soru</Text>
+            <Text style={styles.hedefBaslik}>Günlük Soru Hedefi</Text>
+            <Text style={styles.hedefAdet}>{gorevDurumu.soruSayisi}/20 soru</Text>
           </View>
           <View style={styles.progressBg}>
-            <View style={[styles.progressFill, { width: `${ilerlemeYuzdesi}%` }]} />
+            <View style={[styles.progressFill, {
+              width: `${ilerlemeYuzdesi}%`,
+              backgroundColor: soruTamamlandi ? Colors.success : Colors.primary,
+            }]} />
           </View>
           <Text style={styles.hedefAlt}>
-            {gunlukHedef - gunlukCozulen > 0
-              ? `${gunlukHedef - gunlukCozulen} soru daha çöz ve hedefe ulaş!`
-              : '🎉 Günlük hedefini tamamladın!'}
+            {soruTamamlandi
+              ? '🎉 Günlük soru hedefini tamamladın!'
+              : `${20 - gorevDurumu.soruSayisi} soru daha çöz ve hedefe ulaş!`}
           </Text>
         </View>
 
-        {/* Seri Sıralaması */}
-        <Text style={styles.bolumBaslik}>🏆 Seri Sıralaması</Text>
-        <SeriSiralama benimSeri={stats.streak} />
-
-        {/* Öğrenme Döngüsü */}
+        {/* ─── Öğrenme Döngüsü ─────────────────────────────── */}
         <Pressable
           style={({ pressed }) => [styles.dongusuKart, pressed && { opacity: 0.9 }]}
           onPress={handleOgrenmeDongusu}
@@ -398,7 +630,7 @@ export default function AnaSayfa() {
           <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
         </Pressable>
 
-        {/* Hızlı Başla */}
+        {/* ─── Hızlı Başla ─────────────────────────────────── */}
         <Text style={styles.bolumBaslik}>⚡ Hızlı Başla</Text>
         <View style={styles.hizliRow}>
           <Pressable
@@ -419,7 +651,7 @@ export default function AnaSayfa() {
           </Pressable>
         </View>
 
-        {/* Devam Et */}
+        {/* ─── Devam Et ────────────────────────────────────── */}
         <Text style={styles.bolumBaslik}>▶ Devam Et</Text>
         <Pressable
           style={({ pressed }) => [styles.devamKart, pressed && styles.pressedCard]}
@@ -435,7 +667,7 @@ export default function AnaSayfa() {
           <MaterialIcons name="chevron-right" size={22} color={Colors.textSecondary} />
         </Pressable>
 
-        {/* AI Koç Konuşuyor */}
+        {/* ─── AI Koç ──────────────────────────────────────── */}
         <View style={styles.aiKocKart}>
           <View style={styles.aiKocHeader}>
             <View style={styles.aiKocDot} />
@@ -453,7 +685,7 @@ export default function AnaSayfa() {
           </Pressable>
         </View>
 
-        {/* Zayıf Alanlar */}
+        {/* ─── Zayıf Alanlar ───────────────────────────────── */}
         <Text style={styles.bolumBaslik}>⚠️ Zayıf Alanların</Text>
         {zayifAlanlar.map(k => (
           <Pressable
@@ -480,7 +712,7 @@ export default function AnaSayfa() {
           </Pressable>
         ))}
 
-        {/* Akıllı Başlat */}
+        {/* ─── Akıllı Başlat ───────────────────────────────── */}
         <Text style={styles.bolumBaslik}>🚀 Akıllı Başlat</Text>
         <Pressable
           style={({ pressed }) => [styles.akilliKart, pressed && { opacity: 0.9 }]}
@@ -494,7 +726,7 @@ export default function AnaSayfa() {
           <MaterialIcons name="chevron-right" size={20} color={Colors.gold} />
         </Pressable>
 
-        {/* Bana Özel Test — animasyonsuz, sabit stil */}
+        {/* ─── Bana Özel Test ──────────────────────────────── */}
         <Pressable
           style={({ pressed }) => [styles.ozelTestBtn, pressed && { opacity: 0.85 }]}
           onPress={() => { kisiselTestBaslat(); router.push({ pathname: '/soru', params: { mod: 'kisisel' } }); }}
@@ -519,8 +751,20 @@ const styles = StyleSheet.create({
 
   // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md },
+  headerSol: { flex: 1 },
   appName: { fontSize: FontSize.xxl, fontWeight: FontWeight.extrabold, color: Colors.textPrimary, letterSpacing: 0.5 },
   headerSub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 2 },
+  headerIkonlar: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  headerIconBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: Colors.bgCard, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  lbBadge: {
+    position: 'absolute', top: -2, right: -2,
+    backgroundColor: Colors.bgCard, borderRadius: 8, padding: 1,
+  },
+  lbBadgeText: { fontSize: 9 },
   streakBadge: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.bgCard,
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.full,
@@ -554,13 +798,29 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgCard, borderRadius: Radius.lg, padding: Spacing.md,
     marginBottom: Spacing.md, borderWidth: 1, borderColor: Colors.border,
   },
-  gorevHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, marginBottom: Spacing.sm },
-  gorevEmoji: { fontSize: 18 },
+  gorevKartTamamlandi: {
+    borderColor: Colors.success + '50',
+    backgroundColor: Colors.bgCard,
+  },
+  gorevHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
+  gorevEmoji: { fontSize: 20 },
   gorevBaslik: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  gorevTamamlandiAlt: { fontSize: FontSize.xs, color: Colors.success, fontWeight: FontWeight.semibold, marginTop: 1 },
+  gorevSayacBadge: {
+    backgroundColor: Colors.bgSurface, borderRadius: Radius.full,
+    paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: Colors.border,
+  },
+  gorevSayacText: { fontSize: FontSize.xs, fontWeight: FontWeight.extrabold },
+  gorevProgressBg: {
+    height: 4, backgroundColor: Colors.bgSurface, borderRadius: Radius.full,
+    overflow: 'hidden', marginBottom: Spacing.sm,
+  },
+  gorevProgressFill: { height: '100%', borderRadius: Radius.full },
   gorevItem: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    paddingVertical: 10, borderTopWidth: 1, borderTopColor: Colors.border,
+    paddingVertical: 11, borderTopWidth: 1, borderTopColor: Colors.border,
   },
+  gorevItemTamamlandi: { opacity: 0.8 },
   gorevCheckCircle: {
     width: 28, height: 28, borderRadius: 14, borderWidth: 2,
     borderColor: Colors.borderLight, alignItems: 'center', justifyContent: 'center',
@@ -574,7 +834,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8, paddingVertical: 3,
   },
   gorevTikText: { fontSize: FontSize.xs, color: Colors.success, fontWeight: FontWeight.bold },
-  gorevSayac: { fontSize: FontSize.xs, color: Colors.textMuted },
+  gorevSayac: { fontSize: FontSize.xs, color: Colors.textMuted, marginRight: 2 },
+  bonusBilgi: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: Spacing.sm, paddingTop: Spacing.sm,
+    borderTopWidth: 1, borderTopColor: Colors.border,
+  },
+  bonusBilgiText: { fontSize: FontSize.xs, color: Colors.gold, fontWeight: FontWeight.semibold },
 
   // Hedef
   hedefKart: {
@@ -585,7 +851,7 @@ const styles = StyleSheet.create({
   hedefBaslik: { fontSize: FontSize.md, fontWeight: FontWeight.semibold, color: Colors.textPrimary, flex: 1 },
   hedefAdet: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.gold },
   progressBg: { height: 10, backgroundColor: Colors.bgSurface, borderRadius: Radius.full, overflow: 'hidden', marginBottom: Spacing.sm },
-  progressFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: Radius.full },
+  progressFill: { height: '100%', borderRadius: Radius.full },
   hedefAlt: { fontSize: FontSize.xs, color: Colors.textSecondary },
 
   // Döngü
@@ -678,7 +944,7 @@ const styles = StyleSheet.create({
   akilliBaslik: { fontSize: FontSize.base, fontWeight: FontWeight.bold, color: Colors.gold },
   akilliAlt: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
 
-  // Bana Özel Test — sabit, animasyonsuz
+  // Bana Özel Test
   ozelTestBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: Colors.primary, borderRadius: Radius.lg,
