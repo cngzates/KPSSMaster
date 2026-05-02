@@ -61,6 +61,7 @@ interface SoruAI extends MiniSoruData {
   ders?: string;
   konu?: string;
   zorluk: 'Kolay' | 'Orta' | 'Zor';
+  kazanim?: string;
 }
 
 export default function SoruEkrani() {
@@ -585,6 +586,13 @@ export default function SoruEkrani() {
           </View>
 
           {/* Açıklama */}
+          {cevaplandi && mevcutSoru.kazanim ? (
+            <View style={styles.kazanimChip}>
+              <MaterialIcons name="school" size={12} color={Colors.gold} />
+              <Text style={styles.kazanimText} numberOfLines={2}>{mevcutSoru.kazanim}</Text>
+            </View>
+          ) : null}
+
           {cevaplandi && (
             <View style={[styles.aciklamaKart, {
               borderColor: (() => {
@@ -761,6 +769,15 @@ const styles = StyleSheet.create({
   sikMetni: { flex: 1, fontSize: FontSize.base, color: Colors.textPrimary, lineHeight: 22, fontWeight: FontWeight.medium },
 
   // Açıklama
+  kazanimChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.gold + '15', borderRadius: Radius.md,
+    paddingHorizontal: 12, paddingVertical: 6, marginBottom: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.gold + '30',
+  },
+  kazanimText: {
+    fontSize: 10, color: Colors.gold, fontWeight: FontWeight.semibold, flex: 1,
+  },
   aciklamaKart: {
     borderRadius: Radius.lg, padding: Spacing.md, borderWidth: 1, borderColor: Colors.primary + '30',
   },

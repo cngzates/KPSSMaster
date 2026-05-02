@@ -12,9 +12,11 @@ export interface MiniSoruData {
   siklar: string[];
   dogru_cevap: string;
   aciklama: string;
+  zorluk?: 'Kolay' | 'Orta' | 'Zor';
+  kazanim?: string;
 }
 
-async function aiIstek(params: Record<string, string | object | undefined>): Promise<AIYanit> {
+async function aiIstek(params: Record<string, string | number | object | undefined>): Promise<AIYanit> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.functions.invoke('ai-learning', { body: params });
 
@@ -49,10 +51,13 @@ export async function tekrarAnlat(konu: string, ders: string): Promise<AIYanit> 
 }
 
 export async function miniSoruUret(konu: string, ders: string): Promise<MiniSoruData[]> {
-  const yanit = await aiIstek({ tip: 'soru_uret', konu, ders });
+  const yanit = await aiIstek({ tip: 'soru_uret', konu, ders, soru_sayisi: 3 });
   if (yanit.error || !yanit.content) return [];
   try {
-    const jsonStr = yanit.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    let jsonStr = yanit.content.trim();
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (jsonMatch) jsonStr = jsonMatch[0];
+    jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     const parsed = JSON.parse(jsonStr);
     return parsed.sorular || [];
   } catch {
@@ -66,6 +71,7 @@ export async function aiSoruUret(params: {
   kategori?: string;
   zorluk?: 'Kolay' | 'Orta' | 'Zor';
   soru_sayisi?: number;
+  kullanici_zayiflari?: string;
 }): Promise<MiniSoruData[]> {
   const yanit = await aiIstek({
     tip: 'soru_uret',
@@ -74,18 +80,19 @@ export async function aiSoruUret(params: {
     kategori: params.kategori,
     zorluk: params.zorluk ?? 'Orta',
     soru_sayisi: params.soru_sayisi ?? 5,
+    kullanici_zayiflari: params.kullanici_zayiflari,
   });
   if (yanit.error || !yanit.content) return [];
   try {
-    // JSON bloğunu bul ve ayrıştır
     let jsonStr = yanit.content.trim();
     const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
     if (jsonMatch) jsonStr = jsonMatch[0];
     jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     const parsed = JSON.parse(jsonStr);
-    return (parsed.sorular || []).map((s: MiniSoruData & { zorluk?: string }) => ({
+    return (parsed.sorular || []).map((s: MiniSoruData & { zorluk?: string; kazanim?: string }) => ({
       ...s,
-      zorluk: s.zorluk || params.zorluk || 'Orta',
+      zorluk: (s.zorluk as 'Kolay' | 'Orta' | 'Zor') || params.zorluk || 'Orta',
+      kazanim: s.kazanim || '',
     }));
   } catch (e) {
     console.error('aiSoruUret parse error:', e, yanit.content.slice(0, 200));
@@ -102,7 +109,10 @@ export async function yaziAnaliz(konu: string, kullanici_metni: string): Promise
   const yanit = await aiIstek({ tip: 'yazi_analiz', konu, kullanici_metni });
   if (yanit.error || !yanit.content) return null;
   try {
-    const jsonStr = yanit.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    let jsonStr = yanit.content.trim();
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (jsonMatch) jsonStr = jsonMatch[0];
+    jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     return JSON.parse(jsonStr);
   } catch {
     return null;
