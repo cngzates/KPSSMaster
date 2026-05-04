@@ -1,5 +1,5 @@
 import React, { createContext, useState, ReactNode, useCallback, useEffect } from 'react';
-import { SORULAR, KATEGORILER, Soru, Kategori } from '@/constants/data';
+import { KATEGORILER, Soru, Kategori } from '@/constants/data';
 import { useAuth } from '@/template';
 import { getSupabaseClient } from '@/template';
 
@@ -32,7 +32,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [gunlukHedef] = useState(20);
   const [testSonuclari, setTestSonuclari] = useState<TestSonucu[]>([]);
   const [aktifKategori, setAktifKategori] = useState<Kategori | null>(null);
-  const [suankiSorular, setSuankiSorular] = useState<Soru[]>(SORULAR.slice(0, 5));
+  const [suankiSorular, setSuankiSorular] = useState<Soru[]>([]);
 
   // Kullanıcı giriş yaptığında günlük ilerlemeyi yükle
   useEffect(() => {
@@ -84,14 +84,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const kisiselTestBaslat = useCallback(() => {
-    const zayifSorular = SORULAR.filter(s =>
-      s.kategori === 'matematik' || s.kategori === 'tarih'
-    );
-    setSuankiSorular(zayifSorular.length > 0 ? zayifSorular : SORULAR.slice(0, 5));
+    // AI tarafından dinamik üretiliyor — yerel liste gerekmiyor
   }, []);
 
-  const kategoriFiltreliSorular = useCallback((kategoriId: string) => {
-    return SORULAR.filter(s => s.kategori === kategoriId);
+  const kategoriFiltreliSorular = useCallback((_kategoriId: string): Soru[] => {
+    return [];
   }, []);
 
   return (
