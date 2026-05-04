@@ -64,6 +64,63 @@ interface SoruAI extends MiniSoruData {
   kazanim?: string;
 }
 
+// ─── Paylaş Butonu ──────────────────────────────────────────────────────────
+function PaylasBtnu({ sorular, userId }: { sorular: SoruAI[]; userId: string }) {
+  const [paylasiliyor, setPaylasiliyor] = useState(false);
+  const [paylasıldi, setPaylasıldi] = useState(false);
+
+  const handlePaylas = async () => {
+    if (paylasiliyor || paylasıldi) return;
+    setPaylasiliyor(true);
+    try {
+      const supabase = getSupabaseClient();
+      const paylasilacaklar = sorular.slice(0, 3).map(s => ({
+        user_id: userId,
+        soru_metni: s.soru,
+        siklar: s.siklar,
+        dogru_cevap: s.dogru_cevap,
+        aciklama: s.aciklama,
+        ders: s.ders || '',
+        kategori: s.kategori || '',
+        zorluk: s.zorluk || 'Orta',
+        kazanim: s.kazanim || '',
+      }));
+      await supabase.from('paylasilan_sorular').insert(paylasilacaklar);
+      setPaylasıldi(true);
+    } catch (e) {
+      console.error('Paylaşım hatası:', e);
+    } finally {
+      setPaylasiliyor(false);
+    }
+  };
+
+  return (
+    <Pressable
+      style={({ pressed }) => [payBtn.btn, paylasıldi && payBtn.paylasıldi, pressed && { opacity: 0.85 }]}
+      onPress={handlePaylas}
+      disabled={paylasiliyor || paylasıldi}
+    >
+      {paylasiliyor
+        ? <ActivityIndicator size="small" color={Colors.primary} />
+        : <MaterialIcons name={paylasıldi ? 'check-circle' : 'share'} size={18} color={paylasıldi ? Colors.success : Colors.primary} />}
+      <Text style={[payBtn.btnText, paylasıldi && { color: Colors.success }]}>
+        {paylasıldi ? 'Keşfet sekmesine eklendi!' : 'Bu soruları Keşfet\'e paylaş'}
+      </Text>
+    </Pressable>
+  );
+}
+
+const payBtn = StyleSheet.create({
+  btn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: Colors.primary + '50', borderRadius: Radius.lg,
+    paddingVertical: 12, paddingHorizontal: Spacing.md, marginTop: Spacing.sm,
+    backgroundColor: Colors.primary + '10',
+  },
+  paylasıldi: { borderColor: Colors.success + '50', backgroundColor: Colors.success + '10' },
+  btnText: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: Colors.primary },
+});
+
 export default function SoruEkrani() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -156,7 +213,7 @@ export default function SoruEkrani() {
         ders,
         kategori: kategori?.ad,
         zorluk,
-        soru_sayisi: 7,
+        soru_sayisi: 10,
       });
 
       if (!aiSorular || aiSorular.length === 0) {
@@ -432,6 +489,11 @@ export default function SoruEkrani() {
               {sorular[0]?.zorluk ?? 'Orta'} seviyede AI tarafından üretildi
             </Text>
           </View>
+
+          {/* Soruları Paylaş */}
+          {user && sorular.length > 0 && (
+            <PaylasBtnu sorular={sorular} userId={user.id} />
+          )}
 
           <View style={styles.aiGeriBildirim}>
             <View style={styles.aiHeader}>

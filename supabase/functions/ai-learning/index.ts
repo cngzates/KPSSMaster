@@ -267,6 +267,25 @@ ${dersContext}
 Türkçe yaz. Gereksiz uzatma. KPSS'e odaklan.`;
       userPrompt = kullanici_metni || '';
 
+    // ─── Taktik üretimi ─────────────────────────────────────────────
+    } else if (tip === 'taktik_uret') {
+      systemPrompt = `Sen KPSS eğitmeni ve bellek uzmanısın.
+Görevin: Verilen KPSS sorusu için akılda kalıcı, pratik ve özgün bir taktik/mnemonik üretmek.
+
+TAKTİK KURALLARI:
+- Kısa, akılda kalıcı ve Türkçe olacak
+- Soru tipine uygun teknik kullan: bellek sarayı, kısaltma, uyaklı cümle, görsel çağrışım
+- 2-4 cümle ile sınırlı
+- Somut ve uygulanabilir olacak
+- Sınavda hız kazandıracak ipucu içerecek
+
+SADECE taktiği yaz, başka hiçbir şey ekleme.`;
+      userPrompt = `Bu KPSS sorusu için akılda kalıcı bir çözüm taktiği yaz:
+
+"${kullanici_metni || konu}"
+
+Taktik:`;
+
     } else {
       return new Response(
         JSON.stringify({ error: 'Geçersiz tip' }),

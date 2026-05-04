@@ -53,9 +53,18 @@ export default function TabLayout() {
       <Tabs.Screen
         name="kategoriler"
         options={{
-          title: 'Kategoriler',
+          title: 'Dersler',
           tabBarIcon: ({ color, size }) => (
             <MaterialIcons name="menu-book" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="kesfet"
+        options={{
+          title: 'Keşfet',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="explore" size={size} color={color} />
           ),
         }}
       />
