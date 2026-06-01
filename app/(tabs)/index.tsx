@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, Animated, Modal
+  View, Text, StyleSheet, ScrollView, Pressable, Animated, Modal, ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -250,7 +250,8 @@ export default function AnaSayfa() {
     bonusVerildi: false,
   });
 
-  const zayifAlanlar = KATEGORILER.sort((a, b) => a.basariYuzdesi - b.basariYuzdesi).slice(0, 2);
+  const [zayifAlanlar, setZayifAlanlar] = useState(KATEGORILER.slice().sort((a, b) => a.basariYuzdesi - b.basariYuzdesi).slice(0, 2));
+  const [ozelTestYukleniyor, setOzelTestYukleniyor] = useState(false);
   const displayAd = user?.username || user?.email?.split('@')[0] || 'Öğrenci';
 
   // ─── Günlük Görev Verisi: Supabase ──────────────────────
@@ -370,8 +371,49 @@ export default function AnaSayfa() {
     if (user) {
       loadStats();
       gunlukGorevYukle();
+      zayifKategorileriYukle();
     }
   }, [user]);
+
+  const zayifKategorileriYukle = async () => {
+    if (!user) return;
+    try {
+      const supabase = getSupabaseClient();
+      const { data } = await supabase
+        .from('soru_gecmisi')
+        .select('kategori, dogru')
+        .eq('user_id', user.id);
+
+      if (!data || data.length < 5) return;
+
+      const gruplar: Record<string, { dogru: number; toplam: number }> = {};
+      for (const row of data) {
+        const kat = row.kategori as string;
+        if (!kat || kat === 'qr') continue;
+        if (!gruplar[kat]) gruplar[kat] = { dogru: 0, toplam: 0 };
+        gruplar[kat].toplam += 1;
+        if (row.dogru) gruplar[kat].dogru += 1;
+      }
+
+      const sirali = Object.entries(gruplar)
+        .filter(([, v]) => v.toplam >= 3)
+        .map(([id, v]) => ({
+          id,
+          basariYuzdesi: Math.round((v.dogru / v.toplam) * 100),
+        }))
+        .sort((a, b) => a.basariYuzdesi - b.basariYuzdesi);
+
+      if (sirali.length === 0) return;
+
+      const zengin = sirali
+        .map(s => KATEGORILER.find(k => k.id === s.id))
+        .filter(Boolean) as typeof KATEGORILER;
+
+      if (zengin.length >= 2) setZayifAlanlar(zengin.slice(0, 2));
+    } catch (e) {
+      console.error('Zayif kategori yukleme hatasi:', e);
+    }
+  };
 
   const loadStats = async () => {
     if (!user) return;
@@ -397,12 +439,76 @@ export default function AnaSayfa() {
   };
 
   const handleAkilliBaslat = () => {
-    const zayif = KATEGORILER.sort((a, b) => a.basariYuzdesi - b.basariYuzdesi)[0];
-    const konu = zayif.konular.sort((a, b) => a.basariYuzdesi - b.basariYuzdesi)[0];
+    const zayif = zayifAlanlar[0] ?? KATEGORILER.slice().sort((a, b) => a.basariYuzdesi - b.basariYuzdesi)[0];
+    const konu = zayif.konular.slice().sort((a, b) => a.basariYuzdesi - b.basariYuzdesi)[0];
     router.push({
       pathname: '/ogrenme-dongusu',
       params: { kategoriId: zayif.id, konuId: konu.id, konuAd: konu.ad, ders: zayif.ders },
     });
+  };
+
+  const handleBanaOzelTest = async () => {
+    if (ozelTestYukleniyor) return;
+    setOzelTestYukleniyor(true);
+    try {
+      let hedefKategoriler: typeof KATEGORILER = [];
+
+      if (user) {
+        const supabase = getSupabaseClient();
+        const { data } = await supabase
+          .from('soru_gecmisi')
+          .select('kategori, dogru')
+          .eq('user_id', user.id);
+
+        if (data && data.length >= 5) {
+          const gruplar: Record<string, { dogru: number; toplam: number }> = {};
+          for (const row of data) {
+            const kat = row.kategori as string;
+            if (!kat || kat === 'qr') continue;
+            if (!gruplar[kat]) gruplar[kat] = { dogru: 0, toplam: 0 };
+            gruplar[kat].toplam += 1;
+            if (row.dogru) gruplar[kat].dogru += 1;
+          }
+
+          const sirali = Object.entries(gruplar)
+            .filter(([, v]) => v.toplam >= 3)
+            .map(([id, v]) => ({ id, basariYuzdesi: Math.round((v.dogru / v.toplam) * 100) }))
+            .sort((a, b) => a.basariYuzdesi - b.basariYuzdesi)
+            .slice(0, 3);
+
+          hedefKategoriler = sirali
+            .map(s => KATEGORILER.find(k => k.id === s.id))
+            .filter(Boolean) as typeof KATEGORILER;
+        }
+      }
+
+      if (hedefKategoriler.length === 0) {
+        hedefKategoriler = KATEGORILER.slice()
+          .sort((a, b) => a.basariYuzdesi - b.basariYuzdesi)
+          .slice(0, 3);
+      }
+
+      const zayifIds = hedefKategoriler.map(k => k.id).join(',');
+      const zayifAdlar = hedefKategoriler.map(k => k.ad).join(', ');
+      const ilkKategori = hedefKategoriler[0];
+      const ilkKonu = ilkKategori.konular.slice().sort((a, b) => a.basariYuzdesi - b.basariYuzdesi)[0];
+
+      router.push({
+        pathname: '/soru',
+        params: {
+          mod: 'kisisel',
+          kategoriId: ilkKategori.id,
+          konuAd: ilkKonu?.ad ?? ilkKategori.ad,
+          zayifKategoriIds: zayifIds,
+          zayifKategoriAdlar: zayifAdlar,
+        },
+      });
+    } catch (e) {
+      console.error('Bana ozel test hatasi:', e);
+      router.push({ pathname: '/soru', params: { mod: 'kisisel', kategoriId: 'turkce' } });
+    } finally {
+      setOzelTestYukleniyor(false);
+    }
   };
 
   const xpProgress = (stats.xp % XP_PER_LEVEL) / XP_PER_LEVEL * 100;
@@ -728,15 +834,32 @@ export default function AnaSayfa() {
 
         {/* ─── Bana Özel Test ──────────────────────────────── */}
         <Pressable
-          style={({ pressed }) => [styles.ozelTestBtn, pressed && { opacity: 0.85 }]}
-          onPress={() => { kisiselTestBaslat(); router.push({ pathname: '/soru', params: { mod: 'kisisel' } }); }}
+          style={({ pressed }) => [styles.ozelTestBtn, pressed && { opacity: 0.85 }, ozelTestYukleniyor && { opacity: 0.8 }]}
+          onPress={handleBanaOzelTest}
+          disabled={ozelTestYukleniyor}
         >
-          <Text style={styles.ozelTestEmoji}>🚀</Text>
-          <View style={styles.ozelTestIcerik}>
-            <Text style={styles.ozelTestText}>Bana Özel Test Oluştur</Text>
-            <Text style={styles.ozelTestAlt}>AI senin zayıf konularına göre test hazırladı</Text>
-          </View>
-          <MaterialIcons name="arrow-forward" size={20} color="#FFFFFF" />
+          {ozelTestYukleniyor ? (
+            <>
+              <ActivityIndicator size="small" color="#FFFFFF" />
+              <View style={styles.ozelTestIcerik}>
+                <Text style={styles.ozelTestText}>Zayif Alanlar Analiz Ediliyor...</Text>
+                <Text style={styles.ozelTestAlt}>En dusuk basarili 3 kategori tespit ediliyor</Text>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.ozelTestEmoji}>🚀</Text>
+              <View style={styles.ozelTestIcerik}>
+                <Text style={styles.ozelTestText}>Bana Ozel Test Olustur</Text>
+                <Text style={styles.ozelTestAlt}>
+                  {zayifAlanlar.length > 0
+                    ? `${zayifAlanlar.map(k => k.ad).join(' & ')} odakli - 10 soru`
+                    : 'AI senin zayif konularina gore test hazirlar'}
+                </Text>
+              </View>
+              <MaterialIcons name="arrow-forward" size={20} color="#FFFFFF" />
+            </>
+          )}
         </Pressable>
 
         <View style={{ height: Spacing.xl }} />

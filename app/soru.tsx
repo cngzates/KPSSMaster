@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable, Animated, Vibration, ActivityIndicator
@@ -67,10 +68,10 @@ interface SoruAI extends MiniSoruData {
 // ─── Paylaş Butonu ──────────────────────────────────────────────────────────
 function PaylasBtnu({ sorular, userId }: { sorular: SoruAI[]; userId: string }) {
   const [paylasiliyor, setPaylasiliyor] = useState(false);
-  const [paylasıldi, setPaylasıldi] = useState(false);
+  const [paylasildi, setPaylasildi] = useState(false);
 
   const handlePaylas = async () => {
-    if (paylasiliyor || paylasıldi) return;
+    if (paylasiliyor || paylasildi) return;
     setPaylasiliyor(true);
     try {
       const supabase = getSupabaseClient();
@@ -86,7 +87,7 @@ function PaylasBtnu({ sorular, userId }: { sorular: SoruAI[]; userId: string }) 
         kazanim: s.kazanim || '',
       }));
       await supabase.from('paylasilan_sorular').insert(paylasilacaklar);
-      setPaylasıldi(true);
+      setPaylasildi(true);
     } catch (e) {
       console.error('Paylaşım hatası:', e);
     } finally {
@@ -96,15 +97,15 @@ function PaylasBtnu({ sorular, userId }: { sorular: SoruAI[]; userId: string }) 
 
   return (
     <Pressable
-      style={({ pressed }) => [payBtn.btn, paylasıldi && payBtn.paylasıldi, pressed && { opacity: 0.85 }]}
+      style={({ pressed }) => [payBtn.btn, paylasildi && payBtn.paylasildi, pressed && { opacity: 0.85 }]}
       onPress={handlePaylas}
-      disabled={paylasiliyor || paylasıldi}
+      disabled={paylasiliyor || paylasildi}
     >
       {paylasiliyor
         ? <ActivityIndicator size="small" color={Colors.primary} />
-        : <MaterialIcons name={paylasıldi ? 'check-circle' : 'share'} size={18} color={paylasıldi ? Colors.success : Colors.primary} />}
-      <Text style={[payBtn.btnText, paylasıldi && { color: Colors.success }]}>
-        {paylasıldi ? 'Keşfet sekmesine eklendi!' : 'Bu soruları Keşfet\'e paylaş'}
+        : <MaterialIcons name={paylasildi ? 'check-circle' : 'share'} size={18} color={paylasildi ? Colors.success : Colors.primary} />}
+      <Text style={[payBtn.btnText, paylasildi && { color: Colors.success }]}>
+        {paylasildi ? 'Keşfet sekmesine eklendi!' : 'Bu soruları Keşfet\'e paylaş'}
       </Text>
     </Pressable>
   );
@@ -117,7 +118,7 @@ const payBtn = StyleSheet.create({
     paddingVertical: 12, paddingHorizontal: Spacing.md, marginTop: Spacing.sm,
     backgroundColor: Colors.primary + '10',
   },
-  paylasıldi: { borderColor: Colors.success + '50', backgroundColor: Colors.success + '10' },
+  paylasildi: { borderColor: Colors.success + '50', backgroundColor: Colors.success + '10' },
   btnText: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: Colors.primary },
 });
 
@@ -128,6 +129,8 @@ export default function SoruEkrani() {
     konuId?: string;
     konuAd?: string;
     mod?: string;
+    zayifKategoriIds?: string;
+    zayifKategoriAdlar?: string;
   }>();
   const { soruCevapla } = useApp();
   const { user } = useAuth();
@@ -189,21 +192,81 @@ export default function SoruEkrani() {
     setSeriSayisi(0);
     setKazanilanXP(0);
 
+    const isKisiselMod = params.mod === 'kisisel';
     const kategoriId = params.kategoriId || 'turkce';
     const kategori = KATEGORILER.find(k => k.id === kategoriId);
 
-    // Konu bilgisi
+    // Kişisel mod: zayif kategori listesinden karma soru üret
+    if (isKisiselMod && params.zayifKategoriIds) {
+      const zayifIds = params.zayifKategoriIds.split(',').filter(Boolean);
+      const zayifAdlar = params.zayifKategoriAdlar || zayifIds.join(', ');
+
+      // Her kategori için soru dağılımı: 10 soruyu böl
+      const soruPerKat = Math.ceil(10 / zayifIds.length);
+
+      try {
+        const tumSorularArr = await Promise.all(
+          zayifIds.map(async (katId) => {
+            const kat = KATEGORILER.find(k => k.id === katId);
+            if (!kat) return [];
+            const konu = kat.konular.slice().sort((a, b) => a.basariYuzdesi - b.basariYuzdesi)[0];
+            const basariYuzdesi = await getKategoriBasariYuzdesi(katId);
+            const zorluk = zorluğuBelirle(basariYuzdesi);
+            const katSorular = await aiSoruUret({
+              konu: konu?.ad ?? kat.ad,
+              ders: kat.ders,
+              kategori: kat.ad,
+              zorluk,
+              soru_sayisi: soruPerKat,
+              kullanici_zayiflari: zayifAdlar,
+            });
+            return katSorular.map((s, i) => ({
+              ...s,
+              id: s.id || `kisisel_${katId}_${Date.now()}_${i}`,
+              kategori: katId,
+              ders: kat.ders,
+              konu: konu?.ad ?? kat.ad,
+              zorluk: (s.zorluk as 'Kolay' | 'Orta' | 'Zor') || zorluk,
+            }));
+          })
+        );
+
+        const tumSorular = tumSorularArr.flat().slice(0, 10);
+
+        if (tumSorular.length === 0) {
+          setHataMetni('AI su an soru uretemedi. Lutfen tekrar dene.');
+          setYukleniyorDurum('hata');
+          return;
+        }
+
+        // Karıştır
+        const karisik = tumSorular.sort(() => Math.random() - 0.5);
+        setSorular(karisik as SoruAI[]);
+        setYukleniyorDurum('hazir');
+        Animated.timing(progressAnim, {
+          toValue: (1 / karisik.length) * 100,
+          duration: 400,
+          useNativeDriver: false,
+        }).start();
+        return;
+      } catch (e) {
+        console.error('Kisisel test hatasi:', e);
+        setHataMetni('Baglanti hatasi. Internet baglantini kontrol et.');
+        setYukleniyorDurum('hata');
+        return;
+      }
+    }
+
+    // Normal mod
     let konuAd = params.konuAd || '';
     let ders = kategori?.ders || 'Genel Yetenek';
 
     if (!konuAd) {
-      // Konu seçilmemişse kategorinin rastgele bir konusunu al
       const konular = kategori?.konular || [];
       const rastgeleKonu = konular[Math.floor(Math.random() * konular.length)];
       konuAd = rastgeleKonu?.ad || kategori?.ad || 'Genel';
     }
 
-    // Dinamik zorluk
     const basariYuzdesi = await getKategoriBasariYuzdesiLocal(kategoriId);
     const zorluk = zorluğuBelirle(basariYuzdesi);
 
@@ -245,16 +308,16 @@ export default function SoruEkrani() {
       setHataMetni('Bağlantı hatası. İnternet bağlantını kontrol et.');
       setYukleniyorDurum('hata');
     }
-  }, [params.kategoriId, params.konuAd, params.konuId]);
+  }, [params.kategoriId, params.konuAd, params.konuId, params.mod, params.zayifKategoriIds, getKategoriBasariYuzdesi]);
 
   // Lokal başarı yüzdesi (sync)
-  const getKategoriBasariYuzdesiLocal = async (kategoriId: string): Promise<number> => {
+  const getKategoriBasariYuzdesiLocal = useCallback(async (kategoriId: string): Promise<number> => {
     return getKategoriBasariYuzdesi(kategoriId);
-  };
+  }, [getKategoriBasariYuzdesi]);
 
   useEffect(() => {
     soruYukle();
-  }, []);
+  }, [soruYukle]);
 
   useEffect(() => {
     if (sorular.length > 0 && aktifIndex > 0) {
@@ -264,7 +327,7 @@ export default function SoruEkrani() {
         useNativeDriver: false,
       }).start();
     }
-  }, [aktifIndex, sorular.length]);
+  }, [aktifIndex, sorular.length, progressAnim]);
 
   const triggerShake = () => {
     Animated.sequence([
@@ -392,30 +455,40 @@ export default function SoruEkrani() {
 
   // ─── YÜKLEME EKRANI ───────────────────────────────────────────
   if (yukleniyorDurum === 'yukleniyor' || yukleniyorDurum === 'hazirlik') {
+    const isKisisel = params.mod === 'kisisel';
     const kategori = KATEGORILER.find(k => k.id === params.kategoriId);
+    const zayifAdlar = params.zayifKategoriAdlar;
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.yukleniyorEkrani}>
           <View style={styles.yukleniyorIkon}>
-            <MaterialIcons name="auto-awesome" size={40} color={Colors.primary} />
+            <MaterialIcons name={isKisisel ? 'person-pin' : 'auto-awesome'} size={40} color={Colors.primary} />
           </View>
           <ActivityIndicator size="large" color={Colors.primary} style={{ marginVertical: Spacing.md }} />
-          <Text style={styles.yukleniyorBaslik}>AI Soru Üretiyor...</Text>
+          <Text style={styles.yukleniyorBaslik}>
+            {isKisisel ? 'Kisisel Test Olusturuluyor...' : 'AI Soru Uretiyor...'}
+          </Text>
           <Text style={styles.yukleniyorAlt}>
-            {kategori?.ad ?? 'KPSS'} konusunda kişiselleştirilmiş sorular hazırlanıyor
+            {isKisisel && zayifAdlar
+              ? `Zayif alanlarin: ${zayifAdlar} icin 10 soru hazirlaniyor`
+              : `${kategori?.ad ?? 'KPSS'} konusunda kisisellestirilmis sorular hazirlaniyor`}
           </Text>
           <View style={styles.yukleniyorBilgi}>
             <View style={styles.yukleniyorAdim}>
               <MaterialIcons name="psychology" size={16} color={Colors.gold} />
-              <Text style={styles.yukleniyorAdimText}>Başarı analiz ediliyor</Text>
+              <Text style={styles.yukleniyorAdimText}>
+                {isKisisel ? 'Zayif kategoriler tespit edildi' : 'Basari analiz ediliyor'}
+              </Text>
             </View>
             <View style={styles.yukleniyorAdim}>
               <MaterialIcons name="tune" size={16} color={Colors.primary} />
-              <Text style={styles.yukleniyorAdimText}>Zorluk ayarlanıyor</Text>
+              <Text style={styles.yukleniyorAdimText}>Zorluk seviyesi ayarlaniyor</Text>
             </View>
             <View style={styles.yukleniyorAdim}>
               <MaterialIcons name="quiz" size={16} color={Colors.success} />
-              <Text style={styles.yukleniyorAdimText}>KPSS soruları üretiliyor</Text>
+              <Text style={styles.yukleniyorAdimText}>
+                {isKisisel ? 'Karma kategorili 10 soru uretiliyor' : 'KPSS sorulari uretiliyor'}
+              </Text>
             </View>
           </View>
         </View>
@@ -481,6 +554,16 @@ export default function SoruEkrani() {
             <MaterialIcons name="stars" size={22} color={Colors.gold} />
             <Text style={styles.xpKazanimText}>+{toplamXP} XP kazandın!</Text>
           </View>
+
+          {/* Kişisel Test Özeti */}
+          {params.mod === 'kisisel' && params.zayifKategoriAdlar ? (
+            <View style={styles.kisiselTestBilgi}>
+              <MaterialIcons name="person-pin" size={14} color={Colors.primary} />
+              <Text style={styles.kisiselTestText}>
+                Zayif alanlarin: {params.zayifKategoriAdlar}
+              </Text>
+            </View>
+          ) : null}
 
           {/* Zorluk bilgisi */}
           <View style={styles.zorluKBilgi}>
@@ -880,6 +963,13 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.gold + '40',
   },
   xpKazanimText: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.gold },
+  kisiselTestBilgi: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: Colors.primary + '12', borderRadius: Radius.full,
+    paddingHorizontal: 14, paddingVertical: 6, marginBottom: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.primary + '30',
+  },
+  kisiselTestText: { fontSize: FontSize.xs, color: Colors.primary, flex: 1, fontWeight: FontWeight.medium },
   zorluKBilgi: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     marginBottom: Spacing.md,
