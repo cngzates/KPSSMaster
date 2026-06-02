@@ -10,7 +10,6 @@ import { useAuth, useAlert } from '@/template';
 import { getSupabaseClient } from '@/template';
 import { useRouter } from 'expo-router';
 import { userStatsGetir } from '@/services/learningService';
-import { useRouter } from 'expo-router';
 
 const XP_PER_LEVEL = 500;
 
