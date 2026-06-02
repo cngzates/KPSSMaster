@@ -13,6 +13,7 @@ export default function RootLayout() {
             <StatusBar style="light" />
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="premium" options={{ headerShown: false }} />
             </Stack>
           </AppProvider>
         </AuthProvider>

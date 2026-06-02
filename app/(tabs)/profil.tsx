@@ -10,6 +10,7 @@ import { useAuth, useAlert } from '@/template';
 import { getSupabaseClient } from '@/template';
 import { useRouter } from 'expo-router';
 import { userStatsGetir } from '@/services/learningService';
+import { useRouter } from 'expo-router';
 
 const XP_PER_LEVEL = 500;
 
@@ -26,6 +27,7 @@ export default function Profil() {
   const router = useRouter();
   const [istatistik, setIstatistik] = useState({ toplam: 0, dogru: 0, yanlis: 0 });
   const [stats, setStats] = useState({ xp: 0, streak: 0, level: 1 });
+  const [isPremium, setIsPremium] = useState(false);
 
   // Rozet glow animasyonları
   const glowAnims = useRef(ROZETLER.map(() => new Animated.Value(0.5))).current;
@@ -69,7 +71,10 @@ export default function Profil() {
   const loadStats = async () => {
     if (!user) return;
     const data = await userStatsGetir(user.id);
-    if (data) setStats({ xp: data.xp, streak: data.streak, level: data.level });
+    if (data) {
+      setStats({ xp: data.xp, streak: data.streak, level: data.level });
+      setIsPremium(data.is_premium ?? false);
+    }
   };
 
   const basariYuzdesi = istatistik.toplam > 0
@@ -152,7 +157,14 @@ export default function Profil() {
           <View style={styles.avatarBuyuk}>
             <Text style={styles.avatarHarf}>{adHarf}</Text>
           </View>
-          <Text style={styles.kullaniciAd}>{displayAd}</Text>
+          <View style={styles.kullaniciAdRow}>
+            <Text style={styles.kullaniciAd}>{displayAd}</Text>
+            {isPremium && (
+              <View style={styles.premiumUserBadge}>
+                <Text style={styles.premiumUserBadgeText}>👑 PRO</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.kullaniciEmail}>{user.email}</Text>
           <View style={styles.istatRow}>
             <View style={styles.istatItem}>
@@ -237,16 +249,33 @@ export default function Profil() {
 
         {/* Premium */}
         <View style={styles.premiumBolum}>
-          <View style={styles.premiumBanner}>
-            <Text style={styles.premiumEmoji}>👑</Text>
-            <View style={styles.premiumBilgi}>
-              <Text style={styles.premiumBaslik}>KPSS Master Premium</Text>
-              <Text style={styles.premiumAciklama}>Sınırsız soru • AI özel test • Reklamsız</Text>
+          {isPremium ? (
+            <View style={[styles.premiumBanner, styles.premiumAktifBanner]}>
+              <Text style={styles.premiumEmoji}>👑</Text>
+              <View style={styles.premiumBilgi}>
+                <Text style={[styles.premiumBaslik, { color: Colors.gold }]}>Premium Aktif!</Text>
+                <Text style={styles.premiumAciklama}>Tüm özellikler açık • Sınırsız erişim</Text>
+              </View>
+              <View style={styles.premiumAktifBadge}>
+                <MaterialIcons name="verified" size={16} color={Colors.gold} />
+                <Text style={styles.premiumAktifText}>Aktif</Text>
+              </View>
             </View>
-            <Pressable style={styles.premiumBtn}>
-              <Text style={styles.premiumBtnText}>Al</Text>
+          ) : (
+            <Pressable
+              style={({ pressed }) => [styles.premiumBanner, pressed && { opacity: 0.9 }]}
+              onPress={() => router.push('/premium')}
+            >
+              <Text style={styles.premiumEmoji}>👑</Text>
+              <View style={styles.premiumBilgi}>
+                <Text style={styles.premiumBaslik}>KPSS Master Premium</Text>
+                <Text style={styles.premiumAciklama}>100 soru • AI koç • Gelişmiş analiz</Text>
+              </View>
+              <View style={styles.premiumBtn}>
+                <Text style={styles.premiumBtnText}>₺149</Text>
+              </View>
             </Pressable>
-          </View>
+          )}
         </View>
 
         {/* Ayarlar */}
@@ -309,7 +338,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgCard, marginHorizontal: Spacing.md, borderRadius: Radius.xl,
     padding: Spacing.lg, alignItems: 'center', marginBottom: Spacing.md, borderWidth: 1, borderColor: Colors.border,
   },
-  kullaniciAd: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.textPrimary, marginBottom: 4 },
+  kullaniciAdRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  kullaniciAd: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  premiumUserBadge: {
+    backgroundColor: Colors.gold + '20', borderRadius: Radius.full,
+    paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: Colors.gold + '50',
+  },
+  premiumUserBadgeText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, color: Colors.gold },
   kullaniciEmail: { fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: Spacing.md },
   istatRow: { flexDirection: 'row', width: '100%', paddingTop: Spacing.md, borderTopWidth: 1, borderTopColor: Colors.border },
   istatItem: { flex: 1, alignItems: 'center' },
@@ -376,6 +411,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.gold + '18',
     borderRadius: Radius.lg, padding: Spacing.md, borderWidth: 1, borderColor: Colors.gold + '40', gap: Spacing.sm,
   },
+  premiumAktifBanner: { borderColor: Colors.gold + '60', backgroundColor: Colors.gold + '12' },
+  premiumAktifBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: Colors.gold + '25', borderRadius: Radius.md,
+    paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: Colors.gold + '50',
+  },
+  premiumAktifText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, color: Colors.gold },
   premiumEmoji: { fontSize: 28 },
   premiumBilgi: { flex: 1 },
   premiumBaslik: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.gold },

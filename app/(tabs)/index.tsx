@@ -252,6 +252,7 @@ export default function AnaSayfa() {
 
   const [zayifAlanlar, setZayifAlanlar] = useState(KATEGORILER.slice().sort((a, b) => a.basariYuzdesi - b.basariYuzdesi).slice(0, 2));
   const [ozelTestYukleniyor, setOzelTestYukleniyor] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
   const displayAd = user?.username || user?.email?.split('@')[0] || 'Öğrenci';
 
   // ─── Günlük Görev Verisi: Supabase ──────────────────────
@@ -375,6 +376,19 @@ export default function AnaSayfa() {
     }
   }, [user]);
 
+  const premiumDurumYukle = useCallback(async () => {
+    if (!user) return;
+    try {
+      const supabase = getSupabaseClient();
+      const { data } = await supabase
+        .from('user_stats')
+        .select('is_premium')
+        .eq('user_id', user.id)
+        .single();
+      setIsPremium(data?.is_premium ?? false);
+    } catch {}
+  }, [user]);
+
   const zayifKategorileriYukle = async () => {
     if (!user) return;
     try {
@@ -418,7 +432,10 @@ export default function AnaSayfa() {
   const loadStats = async () => {
     if (!user) return;
     const data = await userStatsGetir(user.id);
-    if (data) setStats({ xp: data.xp, streak: data.streak, level: data.level });
+    if (data) {
+      setStats({ xp: data.xp, streak: data.streak, level: data.level });
+      setIsPremium(data.is_premium ?? false);
+    }
   };
 
   const handleHizliBasla = (kategoriId: string) => {
@@ -832,6 +849,35 @@ export default function AnaSayfa() {
           <MaterialIcons name="chevron-right" size={20} color={Colors.gold} />
         </Pressable>
 
+        {/* ─── 100 Soru Modu (Premium) ──────────────────── */}
+        {isPremium ? (
+          <Pressable
+            style={({ pressed }) => [styles.yusSoruBtn, pressed && { opacity: 0.85 }]}
+            onPress={() => router.push({ pathname: '/soru', params: { kategoriId: 'turkce', mod: 'premium', soru_sayisi: '100' } })}
+          >
+            <Text style={styles.yusSoruEmoji}>💯</Text>
+            <View style={styles.ozelTestIcerik}>
+              <Text style={[styles.ozelTestText, { color: Colors.gold }]}>100 Soruluk Premium Test</Text>
+              <Text style={[styles.ozelTestAlt, { color: 'rgba(255,210,0,0.7)' }]}>Kapsamlı sınav simülasyonu • PRO özelliği</Text>
+            </View>
+            <View style={styles.proBadge}>
+              <Text style={styles.proBadgeText}>PRO</Text>
+            </View>
+          </Pressable>
+        ) : (
+          <Pressable
+            style={({ pressed }) => [styles.premiumTeaseBtn, pressed && { opacity: 0.85 }]}
+            onPress={() => router.push('/premium')}
+          >
+            <MaterialIcons name="lock" size={18} color={Colors.gold} />
+            <View style={styles.ozelTestIcerik}>
+              <Text style={[styles.ozelTestText, { color: Colors.gold }]}>100 Soru Modu + Daha Fazlası</Text>
+              <Text style={[styles.ozelTestAlt, { color: 'rgba(255,210,0,0.65)' }]}>Premium'a geç • ₺149 tek seferlik</Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={18} color={Colors.gold} />
+          </Pressable>
+        )}
+
         {/* ─── Bana Özel Test ──────────────────────────────── */}
         <Pressable
           style={({ pressed }) => [styles.ozelTestBtn, pressed && { opacity: 0.85 }, ozelTestYukleniyor && { opacity: 0.8 }]}
@@ -1076,6 +1122,29 @@ const styles = StyleSheet.create({
     shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4, shadowRadius: 12, elevation: 6,
   },
+  // 100 Soru Modu
+  yusSoruBtn: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.gold + '18', borderRadius: Radius.lg,
+    paddingVertical: 16, paddingHorizontal: Spacing.md,
+    marginTop: Spacing.sm, gap: Spacing.sm,
+    borderWidth: 1.5, borderColor: Colors.gold + '50',
+    shadowColor: Colors.gold, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2, shadowRadius: 8, elevation: 4,
+  },
+  yusSoruEmoji: { fontSize: 22 },
+  premiumTeaseBtn: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.gold + '10', borderRadius: Radius.lg,
+    paddingVertical: 14, paddingHorizontal: Spacing.md,
+    marginTop: Spacing.sm, gap: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.gold + '35',
+  },
+  proBadge: {
+    backgroundColor: Colors.gold, borderRadius: Radius.full,
+    paddingHorizontal: 8, paddingVertical: 3,
+  },
+  proBadgeText: { fontSize: 10, fontWeight: FontWeight.extrabold, color: Colors.bg },
   ozelTestEmoji: { fontSize: 20 },
   ozelTestIcerik: { flex: 1 },
   ozelTestText: { fontSize: FontSize.base, fontWeight: FontWeight.bold, color: '#FFFFFF' },
