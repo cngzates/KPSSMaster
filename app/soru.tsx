@@ -65,8 +65,23 @@ interface SoruAI extends MiniSoruData {
   kazanim?: string;
 }
 
-// ─── Paylaş Butonu ──────────────────────────────────────────────────────────
-function PaylasBtnu({ sorular, userId }: { sorular: SoruAI[]; userId: string }) {
+// ─── Paylaş Butonu (Sadece Premium) ──────────────────────────────────────────
+function PaylasBtnu({ sorular, userId, isPremium }: { sorular: SoruAI[]; userId: string; isPremium: boolean }) {
+  const router = useRouter();
+  const [paylasiliyor, setPaylasiliyor] = useState(false);
+  const [paylasildi, setPaylasildi] = useState(false);
+
+  if (!isPremium) {
+    return (
+      <Pressable
+        style={({ pressed }) => [payBtn.btn, payBtn.kilitli, pressed && { opacity: 0.85 }]}
+        onPress={() => router.push('/premium')}
+      >
+        <MaterialIcons name="lock" size={16} color={Colors.gold} />
+        <Text style={[payBtn.btnText, { color: Colors.gold }]}>Kesfet'e Paylas — Premium Gerekli</Text>
+      </Pressable>
+    );
+  }
   const [paylasiliyor, setPaylasiliyor] = useState(false);
   const [paylasildi, setPaylasildi] = useState(false);
 
@@ -87,7 +102,7 @@ function PaylasBtnu({ sorular, userId }: { sorular: SoruAI[]; userId: string }) 
         kazanim: s.kazanim || '',
       }));
       await supabase.from('paylasilan_sorular').insert(paylasilacaklar);
-      setPaylasildi(true);
+    setPaylasildi(true);
     } catch (e) {
       console.error('Paylaşım hatası:', e);
     } finally {
@@ -119,6 +134,7 @@ const payBtn = StyleSheet.create({
     backgroundColor: Colors.primary + '10',
   },
   paylasildi: { borderColor: Colors.success + '50', backgroundColor: Colors.success + '10' },
+  kilitli: { borderColor: Colors.gold + '40', backgroundColor: Colors.gold + '10' },
   btnText: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: Colors.primary },
 });
 
@@ -144,6 +160,7 @@ export default function SoruEkrani() {
   const [seriSayisi, setSeriSayisi] = useState(0);
   const [konfeti, setKonfeti] = useState(false);
   const [kazanilanXP, setKazanilanXP] = useState(0);
+  const [isPremium, setIsPremium] = useState(false);
 
   // Yükleme durumu
   const [yukleniyorDurum, setYukleniyorDurum] = useState<'hazirlik' | 'yukleniyor' | 'hazir' | 'hata'>('hazirlik');
@@ -154,6 +171,20 @@ export default function SoruEkrani() {
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const xpAnim = useRef(new Animated.Value(0)).current;
   const xpOpacity = useRef(new Animated.Value(0)).current;
+
+  // Premium kontrol
+  useEffect(() => {
+    if (!user) return;
+    const kontrol = async () => {
+      try {
+        const supabase = getSupabaseClient();
+        const { data } = await supabase
+          .from('user_stats').select('is_premium').eq('user_id', user.id).single();
+        setIsPremium(data?.is_premium ?? false);
+      } catch {}
+    };
+    kontrol();
+  }, [user]);
 
   // Başarı oranını Supabase'den çek
   const getKategoriBasariYuzdesi = useCallback(async (kategoriId: string): Promise<number> => {
@@ -193,8 +224,56 @@ export default function SoruEkrani() {
     setKazanilanXP(0);
 
     const isKisiselMod = params.mod === 'kisisel';
+    const isPremiumMod = params.mod === 'premium';
     const kategoriId = params.kategoriId || 'turkce';
     const kategori = KATEGORILER.find(k => k.id === kategoriId);
+
+    // Premium 120 soru modu — tum konulardan karma sorular
+    if (isPremiumMod) {
+      try {
+        const KPSS_KONULARI = [
+          { konu: 'Turkce Dil Bilgisi ve Anlama', ders: 'Turkce', kategori: 'Turkce', soru: 20 },
+          { konu: 'Matematik ve Sayisal Mantik', ders: 'Matematik', kategori: 'Matematik', soru: 20 },
+          { konu: 'Turkiye Tarihi ve Ataturk Ilkeleri', ders: 'Tarih', kategori: 'Tarih', soru: 20 },
+          { konu: 'Turkiye Cografyasi', ders: 'Cografya', kategori: 'Cografya', soru: 20 },
+          { konu: 'Anayasa ve Vatandaslik Bilgisi', ders: 'Vatandaslik', kategori: 'Vatandaslik', soru: 20 },
+          { konu: 'Guncel Olaylar ve Genel Kultur', ders: 'Guncel Bilgiler', kategori: 'Guncel', soru: 20 },
+        ];
+
+        const baslangicZamani = Date.now();
+        const sonuclar = await Promise.all(
+          KPSS_KONULARI.map(k =>
+            aiSoruUret({ konu: k.konu, ders: k.ders, kategori: k.kategori, zorluk: 'Orta', soru_sayisi: k.soru })
+              .then(sorularArr => sorularArr.map((s, i) => ({
+                ...s,
+                id: s.id || `premium_${k.kategori}_${Date.now()}_${i}`,
+                kategori: k.kategori.toLowerCase(),
+                ders: k.ders,
+                konu: k.konu,
+                zorluk: (s.zorluk as 'Kolay' | 'Orta' | 'Zor') || 'Orta',
+              })))
+          )
+        );
+
+        const tumSorular = sonuclar.flat().slice(0, 120);
+        if (tumSorular.length === 0) {
+          setHataMetni('AI su an soru uretemedi. Lutfen tekrar dene.');
+          setYukleniyorDurum('hata');
+          return;
+        }
+
+        const karisik = tumSorular.sort(() => Math.random() - 0.5);
+        setSorular(karisik as SoruAI[]);
+        setYukleniyorDurum('hazir');
+        Animated.timing(progressAnim, { toValue: (1 / karisik.length) * 100, duration: 400, useNativeDriver: false }).start();
+        return;
+      } catch (e) {
+        console.error('Premium test hatasi:', e);
+        setHataMetni('Baglanti hatasi. Internet baglantini kontrol et.');
+        setYukleniyorDurum('hata');
+        return;
+      }
+    }
 
     // Kişisel mod: zayif kategori listesinden karma soru üret
     if (isKisiselMod && params.zayifKategoriIds) {
@@ -401,12 +480,33 @@ export default function SoruEkrani() {
     }
   };
 
-  const handleSonraki = () => {
+  const handleSonraki = async () => {
     if (aktifIndex >= sorular.length - 1) {
-      // Test bitti → XP güncelle
+      // Test bitti → XP güncelle + deneme kaydı
       if (user) {
         const toplamXP = dogruSayisi * XP_DOGRU + XP_TAMAMLAMA;
         userStatsGuncelle(user.id, toplamXP).catch(() => {});
+
+        // Premium 120 soru modunda deneme sınavı sonucunu kaydet
+        if (params.mod === 'premium' && sorular.length >= 100) {
+          const yanlisSayisi = sorular.length - dogruSayisi; // boş yok, tümü cevaplandı varsay
+          const netHesap = Math.round((dogruSayisi - yanlisSayisi / 4) * 10) / 10;
+          const tahminiKPSSPuan = Math.max(40, Math.min(100, 40 + (Math.max(0, netHesap) / sorular.length) * 60));
+          try {
+            const supabase = getSupabaseClient();
+            await supabase.from('deneme_sonuclari').insert({
+              user_id: user.id,
+              dogru: dogruSayisi,
+              yanlis: yanlisSayisi,
+              bos: 0,
+              net: Math.max(0, netHesap),
+              tahmini_puan: Math.round(tahminiKPSSPuan * 100) / 100,
+              soru_sayisi: sorular.length,
+            });
+          } catch (e) {
+            console.error('Deneme kaydı hatası:', e);
+          }
+        }
       }
       setTestBitti(true);
       return;
@@ -575,7 +675,7 @@ export default function SoruEkrani() {
 
           {/* Soruları Paylaş */}
           {user && sorular.length > 0 && (
-            <PaylasBtnu sorular={sorular} userId={user.id} />
+            <PaylasBtnu sorular={sorular} userId={user.id} isPremium={isPremium} />
           )}
 
           <View style={styles.aiGeriBildirim}>

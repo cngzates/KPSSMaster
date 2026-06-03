@@ -46,6 +46,105 @@ const ZORLUK_RENK: Record<string, string> = {
   'Zor': Colors.error,
 };
 
+// ─── Premium Kilit Ekranı ───────────────────────────────────────────────────
+function PremiumKilitEkrani({ onPremiumGit }: { onPremiumGit: () => void }) {
+  const sparkAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(sparkAnim, { toValue: 1, duration: 1600, useNativeDriver: true }),
+        Animated.timing(sparkAnim, { toValue: 0, duration: 1600, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+
+  const glow = sparkAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] });
+
+  return (
+    <View style={kilitStyles.container}>
+      <Animated.View style={[kilitStyles.ikonWrap, { opacity: glow }]}>
+        <Text style={kilitStyles.ikonEmoji}>🔒</Text>
+      </Animated.View>
+      <Text style={kilitStyles.baslik}>Keşfet Premium Özelliği</Text>
+      <Text style={kilitStyles.aciklama}>
+        Topluluk sorularını görmek, beğenmek, yorum yapmak ve soru paylaşmak için
+        Premium üyelik gerekiyor.
+      </Text>
+
+      <View style={kilitStyles.ozellikler}>
+        {[
+          { icon: 'explore', text: 'Topluluk sorularını gör ve çöz' },
+          { icon: 'favorite', text: 'Soruları beğen ve yorum yap' },
+          { icon: 'share', text: 'Kendi sorularını paylaş' },
+          { icon: 'qr-code-scanner', text: 'QR kod ile soru tara' },
+        ].map((item, i) => (
+          <View key={i} style={kilitStyles.ozellikItem}>
+            <View style={kilitStyles.ozellikIkon}>
+              <MaterialIcons name={item.icon as any} size={16} color={Colors.gold} />
+            </View>
+            <Text style={kilitStyles.ozellikText}>{item.text}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Pressable
+        style={({ pressed }) => [kilitStyles.premiumBtn, pressed && { opacity: 0.88 }]}
+        onPress={onPremiumGit}
+      >
+        <MaterialIcons name="verified" size={18} color="#fff" />
+        <Text style={kilitStyles.premiumBtnText}>Premium'a Geç — ₺149</Text>
+      </Pressable>
+
+      <Text style={kilitStyles.notText}>Tek seferlik ödeme • Ömür boyu erişim</Text>
+    </View>
+  );
+}
+
+const kilitStyles = StyleSheet.create({
+  container: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xl,
+  },
+  ikonWrap: {
+    width: 90, height: 90, borderRadius: 45,
+    backgroundColor: Colors.gold + '20', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: Colors.gold + '50', marginBottom: Spacing.lg,
+    shadowColor: Colors.gold, shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4, shadowRadius: 16, elevation: 8,
+  },
+  ikonEmoji: { fontSize: 42 },
+  baslik: {
+    fontSize: FontSize.xl, fontWeight: FontWeight.extrabold, color: Colors.textPrimary,
+    textAlign: 'center', marginBottom: Spacing.sm,
+  },
+  aciklama: {
+    fontSize: FontSize.sm, color: Colors.textSecondary, textAlign: 'center',
+    lineHeight: 20, marginBottom: Spacing.lg,
+  },
+  ozellikler: {
+    alignSelf: 'stretch', backgroundColor: Colors.bgCard, borderRadius: Radius.xl,
+    padding: Spacing.md, borderWidth: 1, borderColor: Colors.border,
+    marginBottom: Spacing.lg, gap: Spacing.sm,
+  },
+  ozellikItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  ozellikIkon: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: Colors.gold + '18', alignItems: 'center', justifyContent: 'center',
+  },
+  ozellikText: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: FontWeight.medium },
+  premiumBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.gold, borderRadius: Radius.xl,
+    paddingVertical: 16, paddingHorizontal: Spacing.xl,
+    shadowColor: Colors.gold, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 12, elevation: 6,
+    alignSelf: 'stretch', justifyContent: 'center', marginBottom: Spacing.sm,
+  },
+  premiumBtnText: { fontSize: FontSize.base, fontWeight: FontWeight.extrabold, color: '#fff' },
+  notText: { fontSize: FontSize.xs, color: Colors.textMuted },
+});
+
 // ─── Soru Kartı ───────────────────────────────────────────────────────────────
 function SoruKarti({
   soru,
@@ -74,7 +173,6 @@ function SoruKarti({
 
   return (
     <View style={styles.soruKart}>
-      {/* Üst bilgi */}
       <View style={styles.soruKartHeader}>
         <View style={styles.yazarWrap}>
           <View style={styles.yazarAvatar}>
@@ -98,15 +196,12 @@ function SoruKarti({
         </View>
       </View>
 
-      {/* Ders etiketi */}
       <View style={styles.dersChip}>
         <Text style={styles.dersText}>{soru.ders || soru.kategori || 'KPSS'}</Text>
       </View>
 
-      {/* Soru metni */}
       <Text style={styles.soruMetin} numberOfLines={4}>{soru.soru_metni}</Text>
 
-      {/* Şık özeti */}
       {soru.siklar && soru.siklar.length > 0 && (
         <View style={styles.sikOzet}>
           {soru.siklar.slice(0, 2).map((sik, i) => (
@@ -120,7 +215,6 @@ function SoruKarti({
         </View>
       )}
 
-      {/* Kazanım */}
       {soru.kazanim ? (
         <View style={styles.kazanimChip}>
           <MaterialIcons name="school" size={11} color={Colors.gold} />
@@ -128,9 +222,7 @@ function SoruKarti({
         </View>
       ) : null}
 
-      {/* Alt butonlar */}
       <View style={styles.soruAltRow}>
-        {/* Beğeni */}
         <Pressable style={styles.soruAltBtn} onPress={handleBegen}>
           <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
             <MaterialIcons
@@ -144,13 +236,11 @@ function SoruKarti({
           </Text>
         </Pressable>
 
-        {/* Yorum */}
         <Pressable style={styles.soruAltBtn} onPress={() => onYorumAc(soru)}>
           <MaterialIcons name="chat-bubble-outline" size={20} color={Colors.textMuted} />
           <Text style={styles.soruAltBtnText}>{soru.yorum_sayisi}</Text>
         </Pressable>
 
-        {/* Çöz */}
         <Pressable
           style={({ pressed }) => [styles.cozBtn, pressed && { opacity: 0.85 }]}
           onPress={() => onCoz(soru)}
@@ -165,10 +255,7 @@ function SoruKarti({
 
 // ─── Yorum Modalı ─────────────────────────────────────────────────────────────
 function YorumModal({
-  soru,
-  gorünür,
-  onKapat,
-  user,
+  soru, gorünür, onKapat, user,
 }: {
   soru: PaylasilanSoru | null;
   gorünür: boolean;
@@ -181,9 +268,7 @@ function YorumModal({
   const [gonderiyor, setGonderiyor] = useState(false);
 
   useEffect(() => {
-    if (gorünür && soru) {
-      yorumlariYukle();
-    }
+    if (gorünür && soru) yorumlariYukle();
   }, [gorünür, soru]);
 
   const yorumlariYukle = async () => {
@@ -199,7 +284,6 @@ function YorumModal({
         .limit(50);
 
       if (data) {
-        // Kullanıcı adlarını çek
         const userIds = [...new Set(data.map(y => y.user_id))];
         const { data: profiles } = await supabase
           .from('user_profiles')
@@ -211,16 +295,10 @@ function YorumModal({
           profileMap[p.id] = p.username || p.email?.split('@')[0] || 'Kullanıcı';
         });
 
-        setYorumlar(data.map(y => ({
-          ...y,
-          yazar_ad: profileMap[y.user_id] || 'Kullanıcı',
-        })));
+        setYorumlar(data.map(y => ({ ...y, yazar_ad: profileMap[y.user_id] || 'Kullanıcı' })));
       }
-    } catch (e) {
-      console.error('Yorum yükleme hatası:', e);
-    } finally {
-      setYukleniyor(false);
-    }
+    } catch {}
+    finally { setYukleniyor(false); }
   };
 
   const yorumGonder = async () => {
@@ -229,33 +307,21 @@ function YorumModal({
     try {
       const supabase = getSupabaseClient();
       await supabase.from('soru_yorum').insert({
-        user_id: user.id,
-        soru_id: soru.id,
-        yorum_metni: yeniYorum.trim(),
+        user_id: user.id, soru_id: soru.id, yorum_metni: yeniYorum.trim(),
       });
-      // Yorum sayısını artır
-      await supabase
-        .from('paylasilan_sorular')
-        .update({ yorum_sayisi: (soru.yorum_sayisi || 0) + 1 })
-        .eq('id', soru.id);
-
+      await supabase.from('paylasilan_sorular')
+        .update({ yorum_sayisi: (soru.yorum_sayisi || 0) + 1 }).eq('id', soru.id);
       setYeniYorum('');
       yorumlariYukle();
-    } catch (e) {
-      console.error('Yorum gönderme hatası:', e);
-    } finally {
-      setGonderiyor(false);
-    }
+    } catch {}
+    finally { setGonderiyor(false); }
   };
 
   if (!soru) return null;
 
   return (
     <Modal visible={gorünür} transparent animationType="slide" onRequestClose={onKapat}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={ym.overlay}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={ym.overlay}>
         <Pressable style={ym.backdrop} onPress={onKapat} />
         <View style={ym.sheet}>
           <View style={ym.handle} />
@@ -265,12 +331,9 @@ function YorumModal({
               <MaterialIcons name="close" size={22} color={Colors.textMuted} />
             </Pressable>
           </View>
-
-          {/* Soru özeti */}
           <View style={ym.soruOzet}>
             <Text style={ym.soruOzetText} numberOfLines={2}>{soru.soru_metni}</Text>
           </View>
-
           {yukleniyor ? (
             <ActivityIndicator color={Colors.primary} style={{ marginVertical: Spacing.lg }} />
           ) : yorumlar.length === 0 ? (
@@ -282,7 +345,6 @@ function YorumModal({
             <ScrollView style={ym.yorumListesi} showsVerticalScrollIndicator={false}>
               {yorumlar.map((y) => {
                 const tarih = new Date(y.created_at);
-                const tarihStr = `${tarih.getDate()}.${tarih.getMonth() + 1}`;
                 return (
                   <View key={y.id} style={ym.yorumItem}>
                     <View style={ym.yorumAvatar}>
@@ -291,7 +353,7 @@ function YorumModal({
                     <View style={ym.yorumSag}>
                       <View style={ym.yorumHeader}>
                         <Text style={ym.yorumYazar}>{y.yazar_ad}</Text>
-                        <Text style={ym.yorumTarih}>{tarihStr}</Text>
+                        <Text style={ym.yorumTarih}>{tarih.getDate()}.{tarih.getMonth() + 1}</Text>
                       </View>
                       <Text style={ym.yorumMetin}>{y.yorum_metni}</Text>
                     </View>
@@ -301,8 +363,6 @@ function YorumModal({
               <View style={{ height: Spacing.md }} />
             </ScrollView>
           )}
-
-          {/* Yorum giriş */}
           {user ? (
             <View style={ym.inputRow}>
               <TextInput
@@ -311,8 +371,7 @@ function YorumModal({
                 onChangeText={setYeniYorum}
                 placeholder="Yorumunu yaz..."
                 placeholderTextColor={Colors.textMuted}
-                multiline
-                maxLength={300}
+                multiline maxLength={300}
               />
               <Pressable
                 style={[ym.gonderiBtn, (!yeniYorum.trim() || gonderiyor) && ym.gonderiBtnDisabled]}
@@ -338,8 +397,7 @@ const ym = StyleSheet.create({
   backdrop: { position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: {
     backgroundColor: Colors.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: Spacing.md, maxHeight: '80%',
-    borderWidth: 1, borderColor: Colors.border,
+    padding: Spacing.md, maxHeight: '80%', borderWidth: 1, borderColor: Colors.border,
   },
   handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: Spacing.md },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm },
@@ -383,6 +441,9 @@ export default function Kesfet() {
   const { showAlert } = useAlert();
   const router = useRouter();
 
+  const [isPremium, setIsPremium] = useState(false);
+  const [premiumYukleniyor, setPremiumYukleniyor] = useState(true);
+
   const [sorular, setSorular] = useState<PaylasilanSoru[]>([]);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [yenileniyor, setYenileniyor] = useState(false);
@@ -390,16 +451,32 @@ export default function Kesfet() {
   const [arama, setArama] = useState('');
   const [aramaAktif, setAramaAktif] = useState(false);
   const [yorumModalSoru, setYorumModalSoru] = useState<PaylasilanSoru | null>(null);
-  const [qrModalAcik, setQrModalAcik] = useState(false);
-
-  // Soru çözme modalı
   const [cozModal, setCozModal] = useState<{
     soru: PaylasilanSoru;
     secilen: string | null;
     cevaplandi: boolean;
   } | null>(null);
 
+  // Premium durumu kontrol
+  useEffect(() => {
+    const premiumKontrol = async () => {
+      if (!user) { setPremiumYukleniyor(false); return; }
+      try {
+        const supabase = getSupabaseClient();
+        const { data } = await supabase
+          .from('user_stats')
+          .select('is_premium')
+          .eq('user_id', user.id)
+          .single();
+        setIsPremium(data?.is_premium ?? false);
+      } catch {}
+      finally { setPremiumYukleniyor(false); }
+    };
+    premiumKontrol();
+  }, [user]);
+
   const soruYukle = useCallback(async (yenile = false) => {
+    if (!isPremium) return;
     if (yenile) setYenileniyor(true);
     else setYukleniyor(true);
 
@@ -417,10 +494,8 @@ export default function Kesfet() {
 
       const { data, error } = await query;
       if (error) throw error;
-
       const rows = data ?? [];
 
-      // Kullanıcı adlarını çek
       const userIds = [...new Set(rows.map(r => r.user_id))];
       let profileMap: Record<string, string> = {};
       if (userIds.length > 0) {
@@ -433,22 +508,13 @@ export default function Kesfet() {
         });
       }
 
-      // Kullanıcının beğenilerini çek
       let begeniSet = new Set<string>();
       let cozulenSet = new Set<string>();
       if (user) {
         const soruIds = rows.map(r => r.id);
         const [begeniRes, gecmisRes] = await Promise.all([
-          supabase
-            .from('soru_begeni')
-            .select('soru_id')
-            .eq('user_id', user.id)
-            .in('soru_id', soruIds),
-          supabase
-            .from('soru_gecmisi')
-            .select('soru_id')
-            .eq('user_id', user.id)
-            .in('soru_id', soruIds),
+          supabase.from('soru_begeni').select('soru_id').eq('user_id', user.id).in('soru_id', soruIds),
+          supabase.from('soru_gecmisi').select('soru_id').eq('user_id', user.id).in('soru_id', soruIds),
         ]);
         begeniRes.data?.forEach(b => begeniSet.add(b.soru_id));
         gecmisRes.data?.forEach(g => cozulenSet.add(g.soru_id));
@@ -463,67 +529,44 @@ export default function Kesfet() {
       }));
 
       setSorular(zenginSorular);
-    } catch (e) {
-      console.error('Keşfet yükleme hatası:', e);
-    } finally {
-      setYukleniyor(false);
-      setYenileniyor(false);
-    }
-  }, [filtre, user]);
+    } catch {}
+    finally { setYukleniyor(false); setYenileniyor(false); }
+  }, [filtre, user, isPremium]);
 
   useEffect(() => {
-    soruYukle();
-  }, [soruYukle]);
+    if (isPremium) soruYukle();
+  }, [soruYukle, isPremium]);
 
   const handleBegen = async (soruId: string) => {
-    if (!user) {
-      showAlert('Giriş Yapman Gerekiyor', 'Beğenmek için lütfen giriş yap.');
-      return;
-    }
+    if (!user) { showAlert('Giriş Yapman Gerekiyor', 'Beğenmek için lütfen giriş yap.'); return; }
     const soru = sorular.find(s => s.id === soruId);
     if (!soru) return;
-
     const supabase = getSupabaseClient();
     if (soru.kullanici_begendi) {
-      // Beğeniyi kaldır
-      await supabase.from('soru_begeni').delete()
-        .eq('user_id', user.id).eq('soru_id', soruId);
+      await supabase.from('soru_begeni').delete().eq('user_id', user.id).eq('soru_id', soruId);
       await supabase.from('paylasilan_sorular')
-        .update({ begeni_sayisi: Math.max(0, soru.begeni_sayisi - 1) })
-        .eq('id', soruId);
+        .update({ begeni_sayisi: Math.max(0, soru.begeni_sayisi - 1) }).eq('id', soruId);
       setSorular(prev => prev.map(s => s.id === soruId
-        ? { ...s, kullanici_begendi: false, begeni_sayisi: Math.max(0, s.begeni_sayisi - 1) }
-        : s
-      ));
+        ? { ...s, kullanici_begendi: false, begeni_sayisi: Math.max(0, s.begeni_sayisi - 1) } : s));
     } else {
-      // Beğen
       await supabase.from('soru_begeni').insert({ user_id: user.id, soru_id: soruId });
       await supabase.from('paylasilan_sorular')
-        .update({ begeni_sayisi: soru.begeni_sayisi + 1 })
-        .eq('id', soruId);
+        .update({ begeni_sayisi: soru.begeni_sayisi + 1 }).eq('id', soruId);
       setSorular(prev => prev.map(s => s.id === soruId
-        ? { ...s, kullanici_begendi: true, begeni_sayisi: s.begeni_sayisi + 1 }
-        : s
-      ));
+        ? { ...s, kullanici_begendi: true, begeni_sayisi: s.begeni_sayisi + 1 } : s));
     }
   };
 
-  const handleCoz = (soru: PaylasilanSoru) => {
-    setCozModal({ soru, secilen: null, cevaplandi: false });
-  };
+  const handleCoz = (soru: PaylasilanSoru) => setCozModal({ soru, secilen: null, cevaplandi: false });
 
   const handleCevapla = () => {
     if (!cozModal || !cozModal.secilen || cozModal.cevaplandi) return;
     setCozModal(prev => prev ? { ...prev, cevaplandi: true } : null);
-
-    // Soru geçmişine kaydet
     if (user && cozModal) {
       const dogru = cozModal.secilen === cozModal.soru.dogru_cevap;
       const supabase = getSupabaseClient();
       supabase.from('soru_gecmisi').insert({
-        user_id: user.id,
-        soru_id: cozModal.soru.id,
-        dogru,
+        user_id: user.id, soru_id: cozModal.soru.id, dogru,
         secilen_sik: cozModal.secilen,
         kategori: cozModal.soru.kategori || 'genel',
         ders: cozModal.soru.ders || '',
@@ -536,14 +579,46 @@ export default function Kesfet() {
   const aramaFiltreliSorular = sorular.filter(s => {
     if (!arama) return true;
     const q = arama.toLowerCase();
-    return (
-      s.soru_metni?.toLowerCase().includes(q) ||
-      s.ders?.toLowerCase().includes(q) ||
-      s.kategori?.toLowerCase().includes(q)
-    );
+    return s.soru_metni?.toLowerCase().includes(q) || s.ders?.toLowerCase().includes(q);
   });
 
   const normalize = (s: string) => s.replace(/[^A-E]/g, '').trim().toUpperCase();
+
+  // Yükleniyor durumu
+  if (premiumYukleniyor) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <View style={styles.headerSol}>
+            <Text style={styles.baslik}>Keşfet</Text>
+          </View>
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Premium değilse kilit ekranı göster
+  if (!isPremium) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <View style={styles.headerSol}>
+            <Text style={styles.baslik}>Keşfet</Text>
+            <Text style={styles.altBaslik}>Premium özelliği</Text>
+          </View>
+          <View style={styles.headerBtnler}>
+            <View style={[styles.headerIconBtn, { backgroundColor: Colors.gold + '15', borderColor: Colors.gold + '30' }]}>
+              <MaterialIcons name="lock" size={20} color={Colors.gold} />
+            </View>
+          </View>
+        </View>
+        <PremiumKilitEkrani onPremiumGit={() => router.push('/premium')} />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -569,7 +644,6 @@ export default function Kesfet() {
         </View>
       </View>
 
-      {/* Arama kutusu */}
       {aramaAktif && (
         <View style={styles.aramaWrap}>
           <MaterialIcons name="search" size={18} color={Colors.textMuted} />
@@ -589,7 +663,6 @@ export default function Kesfet() {
         </View>
       )}
 
-      {/* Kategori filtresi */}
       <View style={styles.filtreWrap}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtreScroll}>
           {KATEGORI_FILTRELER.map(k => (
@@ -604,7 +677,6 @@ export default function Kesfet() {
         </ScrollView>
       </View>
 
-      {/* Liste */}
       {yukleniyor ? (
         <View style={styles.yukleniyorWrap}>
           <ActivityIndicator size="large" color={Colors.primary} />
@@ -647,7 +719,6 @@ export default function Kesfet() {
               <View style={cozStyles.handle} />
               {cozModal && (
                 <ScrollView showsVerticalScrollIndicator={false}>
-                  {/* Ders chip */}
                   <View style={cozStyles.dersChip}>
                     <Text style={cozStyles.dersText}>{cozModal.soru.ders || 'KPSS'}</Text>
                     <View style={[cozStyles.zorlukBadge, {
@@ -659,10 +730,8 @@ export default function Kesfet() {
                     </View>
                   </View>
 
-                  {/* Soru metni */}
                   <Text style={cozStyles.soruMetin}>{cozModal.soru.soru_metni}</Text>
 
-                  {/* Şıklar */}
                   {cozModal.soru.siklar.map((sik, i) => {
                     const label = 'ABCDE'[i];
                     const secilenBu = cozModal.secilen === label;
@@ -689,14 +758,13 @@ export default function Kesfet() {
                         ]}>
                           <Text style={cozStyles.sikLabelText}>{label}</Text>
                         </View>
-                        <Text style={cozStyles.sikMetin}>{sik.replace(/^[A-E]\) /, '')}</Text>
+                        <Text style={cozStyles.sikMetni}>{sik.replace(/^[A-E]\) /, '')}</Text>
                         {dogruBu && <MaterialIcons name="check-circle" size={18} color={Colors.success} />}
                         {yanlisBu && <MaterialIcons name="cancel" size={18} color={Colors.error} />}
                       </Pressable>
                     );
                   })}
 
-                  {/* Açıklama */}
                   {cozModal.cevaplandi && cozModal.soru.aciklama ? (
                     <View style={cozStyles.aciklama}>
                       <View style={cozStyles.aciklamaHeader}>
@@ -704,20 +772,12 @@ export default function Kesfet() {
                         <Text style={cozStyles.aciklamaBaslik}>AI Açıklaması</Text>
                       </View>
                       <Text style={cozStyles.aciklamaMetin}>{cozModal.soru.aciklama}</Text>
-                      {cozModal.soru.kazanim ? (
-                        <View style={cozStyles.kazanimChip}>
-                          <MaterialIcons name="school" size={11} color={Colors.gold} />
-                          <Text style={cozStyles.kazanimText}>{cozModal.soru.kazanim}</Text>
-                        </View>
-                      ) : null}
                     </View>
                   ) : null}
 
                   <View style={{ height: 100 }} />
                 </ScrollView>
               )}
-
-              {/* Alt buton */}
               <View style={cozStyles.altBtn}>
                 {!cozModal?.cevaplandi ? (
                   <Pressable
@@ -725,9 +785,7 @@ export default function Kesfet() {
                     disabled={!cozModal?.secilen}
                     onPress={handleCevapla}
                   >
-                    <Text style={[cozStyles.cevapBtnText, !cozModal?.secilen && { color: Colors.textMuted }]}>
-                      Cevapla
-                    </Text>
+                    <Text style={[cozStyles.cevapBtnText, !cozModal?.secilen && { color: Colors.textMuted }]}>Cevapla</Text>
                   </Pressable>
                 ) : (
                   <Pressable style={cozStyles.cevapBtn} onPress={() => setCozModal(null)}>
@@ -740,7 +798,6 @@ export default function Kesfet() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Yorum Modalı */}
       <YorumModal
         soru={yorumModalSoru}
         gorünür={yorumModalSoru !== null}
@@ -755,8 +812,7 @@ const cozStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: Colors.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: Spacing.md, maxHeight: '90%',
-    borderWidth: 1, borderColor: Colors.border,
+    padding: Spacing.md, maxHeight: '90%', borderWidth: 1, borderColor: Colors.border,
   },
   handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: Spacing.md },
   dersChip: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
@@ -786,11 +842,6 @@ const cozStyles = StyleSheet.create({
   aciklamaHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, marginBottom: Spacing.sm },
   aciklamaBaslik: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.primary },
   aciklamaMetin: { fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 22 },
-  kazanimChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: Spacing.sm,
-    backgroundColor: Colors.gold + '15', borderRadius: Radius.md, padding: 6,
-  },
-  kazanimText: { fontSize: 10, color: Colors.gold, flex: 1 },
   altBtn: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: Spacing.md, backgroundColor: Colors.bgCard },
   cevapBtn: { backgroundColor: Colors.primary, borderRadius: Radius.lg, paddingVertical: 15, alignItems: 'center' },
   cevapBtnDisabled: { backgroundColor: Colors.bgCardAlt, borderWidth: 1, borderColor: Colors.border },
@@ -799,8 +850,6 @@ const cozStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
-
-  // Header
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, paddingBottom: Spacing.sm,
@@ -814,8 +863,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgCard, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: Colors.border,
   },
-
-  // Arama
   aramaWrap: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     marginHorizontal: Spacing.md, marginBottom: Spacing.sm,
@@ -824,8 +871,6 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   aramaInput: { flex: 1, fontSize: FontSize.sm, color: Colors.textPrimary },
-
-  // Filtre
   filtreWrap: { borderBottomWidth: 1, borderBottomColor: Colors.border, marginBottom: Spacing.sm },
   filtreScroll: { paddingHorizontal: Spacing.md, gap: Spacing.sm, paddingBottom: Spacing.sm },
   filtreChip: {
@@ -835,19 +880,13 @@ const styles = StyleSheet.create({
   filtreChipAktif: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filtreText: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.medium },
   filtreTextAktif: { color: '#fff', fontWeight: FontWeight.bold },
-
-  // Liste
   listeContent: { paddingHorizontal: Spacing.md, paddingTop: Spacing.sm },
-
-  // Boş hal
   yukleniyorWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
   yukleniyorText: { fontSize: FontSize.base, color: Colors.textSecondary },
   bosHal: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.md, gap: Spacing.md },
   bosBaslik: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.textPrimary },
   bosAciklama: { fontSize: FontSize.sm, color: Colors.textSecondary, textAlign: 'center', lineHeight: 20 },
   bosAlt: { fontSize: FontSize.xs, color: Colors.textMuted, textAlign: 'center', lineHeight: 18 },
-
-  // Soru kartı
   soruKart: {
     backgroundColor: Colors.bgCard, borderRadius: Radius.lg, padding: Spacing.md,
     marginBottom: Spacing.sm, borderWidth: 1, borderColor: Colors.border,

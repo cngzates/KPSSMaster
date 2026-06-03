@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Dimensions, Pressable, ActivityIndicator
+  View, Text, StyleSheet, ScrollView, Dimensions, Pressable, ActivityIndicator, FlatList
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -31,6 +31,17 @@ interface DersStat {
   basariYuzdesi: number;
 }
 
+interface DenemeKaydi {
+  id: string;
+  dogru: number;
+  yanlis: number;
+  bos: number;
+  net: number;
+  tahmini_puan: number;
+  soru_sayisi: number;
+  created_at: string;
+}
+
 interface AnalizData {
   toplam: number;
   dogru: number;
@@ -54,6 +65,8 @@ export default function Analiz() {
   const { testSonuclari } = useApp();
   const { user } = useAuth();
   const [aktifPeriod, setAktifPeriod] = useState<'gunluk' | 'haftalik'>('haftalik');
+  const [denemeleri, setDenemeleri] = useState<DenemeKaydi[]>([]);
+  const [denemeYukleniyor, setDenemeYukleniyor] = useState(false);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [analizData, setAnalizData] = useState<AnalizData>({
     toplam: 0, dogru: 0, yanlis: 0,
@@ -175,7 +188,24 @@ export default function Analiz() {
 
   useEffect(() => {
     loadAnalizData();
+    if (user) loadDenemeleri();
   }, [loadAnalizData]);
+
+  const loadDenemeleri = async () => {
+    if (!user) return;
+    setDenemeYukleniyor(true);
+    try {
+      const supabase = getSupabaseClient();
+      const { data } = await supabase
+        .from('deneme_sonuclari')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setDenemeleri(data ?? []);
+    } catch {}
+    finally { setDenemeYukleniyor(false); }
+  };
 
   const { toplam, dogru, yanlis, haftalikVeri, dersStat, tahminiNet, netDegisim } = analizData;
   const basariYuzdesi = toplam > 0 ? Math.round((dogru / toplam) * 100) : 0;
@@ -391,6 +421,115 @@ export default function Analiz() {
               </View>
             )}
 
+            {/* Deneme Sinavi Analizi */}
+            <View style={styles.bolum}>
+              <View style={styles.bolumRow}>
+                <Text style={styles.bolumBaslik}>📝 Deneme Sinavi Gecmisi</Text>
+                <Pressable
+                  style={({ pressed }) => [styles.yenileBtn, pressed && { opacity: 0.7 }, { width: 32, height: 32, borderRadius: 16 }]}
+                  onPress={loadDenemeleri}
+                >
+                  {denemeYukleniyor
+                    ? <ActivityIndicator size="small" color={Colors.primary} />
+                    : <MaterialIcons name="refresh" size={16} color={Colors.primary} />}
+                </Pressable>
+              </View>
+
+              {denemeleri.length === 0 ? (
+                <View style={styles.denemeBoş}>
+                  <MaterialIcons name="assignment" size={36} color={Colors.textMuted} />
+                  <Text style={styles.denemeBoşText}>Henuz deneme sinavi yok</Text>
+                  <Text style={styles.denemeBoşAlt}>120 soruluk premium testi cozduğunde sonuclar burada gozukur</Text>
+                </View>
+              ) : (
+                <>
+                  {/* En yuksek puan karti */}
+                  {(() => {
+                    const enIyi = denemeleri.reduce((prev, curr) => curr.net > prev.net ? curr : prev, denemeleri[0]);
+                    const ortalamaPuan = denemeleri.reduce((s, d) => s + d.net, 0) / denemeleri.length;
+                    const sonDeneme = denemeleri[0];
+                    const trend = denemeleri.length > 1 ? sonDeneme.net - denemeleri[1].net : 0;
+                    return (
+                      <View style={styles.denemeOzetRow}>
+                        <View style={[styles.denemeOzetKart, { borderColor: Colors.gold + '50' }]}>
+                          <MaterialIcons name="emoji-events" size={18} color={Colors.gold} />
+                          <Text style={[styles.denemeOzetSayi, { color: Colors.gold }]}>{enIyi.net}</Text>
+                          <Text style={styles.denemeOzetLabel}>En Yuksek Net</Text>
+                        </View>
+                        <View style={[styles.denemeOzetKart, { borderColor: Colors.primary + '50' }]}>
+                          <MaterialIcons name="trending-up" size={18} color={Colors.primary} />
+                          <Text style={[styles.denemeOzetSayi, { color: Colors.primary }]}>{Math.round(ortalamaPuan * 10) / 10}</Text>
+                          <Text style={styles.denemeOzetLabel}>Ortalama Net</Text>
+                        </View>
+                        <View style={[styles.denemeOzetKart, {
+                          borderColor: trend >= 0 ? Colors.success + '50' : Colors.error + '50',
+                        }]}>
+                          <MaterialIcons
+                            name={trend >= 0 ? 'arrow-upward' : 'arrow-downward'}
+                            size={18}
+                            color={trend >= 0 ? Colors.success : Colors.error}
+                          />
+                          <Text style={[styles.denemeOzetSayi, { color: trend >= 0 ? Colors.success : Colors.error }]}>
+                            {trend >= 0 ? '+' : ''}{Math.round(trend * 10) / 10}
+                          </Text>
+                          <Text style={styles.denemeOzetLabel}>Son Degisim</Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
+
+                  {/* Deneme listesi */}
+                  {denemeleri.map((d, i) => {
+                    const tarih = new Date(d.created_at);
+                    const tarihStr = `${tarih.getDate()}.${tarih.getMonth() + 1}.${tarih.getFullYear()}`;
+                    // KPSS puan tahmini: net * (500/120) + 140 (ortalama formul)
+                    const tahminiKPSSPuan = d.tahmini_puan ?? Math.max(40, Math.min(100, 40 + (d.net / 120) * 60));
+                    const netRenk = d.net >= 80 ? Colors.success : d.net >= 60 ? Colors.warning : Colors.error;
+                    return (
+                      <View key={d.id} style={[styles.denemeKaydiKart, i > 0 && { marginTop: Spacing.sm }]}>
+                        <View style={styles.denemeKaydiHeader}>
+                          <View style={styles.denemeKaydiSol}>
+                            <Text style={styles.denemeKaydiTarih}>{tarihStr}</Text>
+                            <Text style={styles.denemeKaydiAlt}>{d.soru_sayisi} soru</Text>
+                          </View>
+                          <View style={[styles.denemeNetBadge, { backgroundColor: netRenk + '20' }]}>
+                            <Text style={[styles.denemeNetText, { color: netRenk }]}>{d.net} Net</Text>
+                          </View>
+                        </View>
+                        <View style={styles.denemeKaydiIstatRow}>
+                          <View style={styles.denemeKaydiIstat}>
+                            <Text style={[styles.denemeIstatSayi, { color: Colors.success }]}>{d.dogru}</Text>
+                            <Text style={styles.denemeIstatLabel}>Dogru</Text>
+                          </View>
+                          <View style={styles.denemeKaydiIstat}>
+                            <Text style={[styles.denemeIstatSayi, { color: Colors.error }]}>{d.yanlis}</Text>
+                            <Text style={styles.denemeIstatLabel}>Yanlis</Text>
+                          </View>
+                          <View style={styles.denemeKaydiIstat}>
+                            <Text style={[styles.denemeIstatSayi, { color: Colors.textMuted }]}>{d.bos}</Text>
+                            <Text style={styles.denemeIstatLabel}>Bos</Text>
+                          </View>
+                          <View style={[styles.denemeKaydiIstat, styles.denemeKPSSPuan]}>
+                            <Text style={[styles.denemeIstatSayi, { color: Colors.gold, fontSize: FontSize.base }]}>
+                              ~{Math.round(tahminiKPSSPuan)}
+                            </Text>
+                            <Text style={[styles.denemeIstatLabel, { color: Colors.gold }]}>KPSS Puan</Text>
+                          </View>
+                        </View>
+                        {/* Net progress bar */}
+                        <View style={styles.denemeNetBar}>
+                          <View style={[styles.denemeNetBarFill, {
+                            width: `${Math.min((d.net / 120) * 100, 100)}%`,
+                            backgroundColor: netRenk,
+                          }]} />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+            </View>
+
             {/* AI Önerisi */}
             <View style={styles.bolum}>
               <Text style={styles.bolumBaslik}>🤖 AI Koç Önerisi</Text>
@@ -573,4 +712,42 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full, paddingHorizontal: 12, paddingVertical: 5,
   },
   zayifBadgeText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold },
+
+  // Deneme Sinavi
+  denemeBos: {
+    alignItems: 'center', paddingVertical: Spacing.xl, gap: Spacing.sm,
+    backgroundColor: Colors.bgCard, borderRadius: Radius.lg,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  denemeBosText: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textSecondary },
+  denemeBosAlt: { fontSize: FontSize.xs, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.md },
+  denemeOzetRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },
+  denemeOzetKart: {
+    flex: 1, backgroundColor: Colors.bgCard, borderRadius: Radius.lg, padding: Spacing.sm,
+    alignItems: 'center', borderWidth: 1.5, gap: 3,
+  },
+  denemeOzetSayi: { fontSize: FontSize.lg, fontWeight: FontWeight.extrabold },
+  denemeOzetLabel: { fontSize: 9, color: Colors.textSecondary, textAlign: 'center' },
+  denemeKaydiKart: {
+    backgroundColor: Colors.bgCard, borderRadius: Radius.lg, padding: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  denemeKaydiHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
+  denemeKaydiSol: {},
+  denemeKaydiTarih: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  denemeKaydiAlt: { fontSize: FontSize.xs, color: Colors.textMuted },
+  denemeNetBadge: { borderRadius: Radius.full, paddingHorizontal: 12, paddingVertical: 5 },
+  denemeNetText: { fontSize: FontSize.sm, fontWeight: FontWeight.extrabold },
+  denemeKaydiIstatRow: { flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.sm },
+  denemeKaydiIstat: { flex: 1, alignItems: 'center' },
+  denemeKPSSPuan: {
+    backgroundColor: Colors.gold + '12', borderRadius: Radius.sm,
+    borderWidth: 1, borderColor: Colors.gold + '30', paddingVertical: 3,
+  },
+  denemeIstatSayi: { fontSize: FontSize.sm, fontWeight: FontWeight.extrabold, color: Colors.textPrimary },
+  denemeIstatLabel: { fontSize: 9, color: Colors.textMuted, marginTop: 2 },
+  denemeNetBar: {
+    height: 4, backgroundColor: Colors.bgSurface, borderRadius: Radius.full, overflow: 'hidden',
+  },
+  denemeNetBarFill: { height: '100%', borderRadius: Radius.full },
 });

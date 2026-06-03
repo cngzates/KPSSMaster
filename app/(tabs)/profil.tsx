@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, Animated
+  View, Text, StyleSheet, ScrollView, Pressable, Animated, Modal, ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -12,6 +13,13 @@ import { useRouter } from 'expo-router';
 import { userStatsGetir } from '@/services/learningService';
 
 const XP_PER_LEVEL = 500;
+
+// Aylık liderlik ödülleri
+const ODUL_AYLAR: Record<number, { ay: number; label: string; renk: string; emoji: string }> = {
+  1: { ay: 3, label: '3 Ay Premium', renk: Colors.gold, emoji: '🥇' },
+  2: { ay: 2, label: '2 Ay Premium', renk: '#C0C0C0', emoji: '🥈' },
+  3: { ay: 1, label: '1 Ay Premium', renk: '#CD7F32', emoji: '🥉' },
+};
 
 // Sonraki rozet hesapla
 function getSonrakiRozet(toplamSoru: number, streak: number) {
@@ -27,6 +35,13 @@ export default function Profil() {
   const [istatistik, setIstatistik] = useState({ toplam: 0, dogru: 0, yanlis: 0 });
   const [stats, setStats] = useState({ xp: 0, streak: 0, level: 1 });
   const [isPremium, setIsPremium] = useState(false);
+  const [liderlikModal, setLiderlikModal] = useState(false);
+  const [liderlikVerisi, setLiderlikVerisi] = useState<Array<{
+    user_id: string; ad: string; xp: number; soru_sayisi: number; sira: number;
+  }>>([]);
+  const [liderlikYukleniyor, setLiderlikYukleniyor] = useState(false);
+  const [benimLiderlikSiram, setBenimLiderlikSiram] = useState<number | null>(null);
+  const crownAnim = useRef(new Animated.Value(1)).current;
 
   // Rozet glow animasyonları
   const glowAnims = useRef(ROZETLER.map(() => new Animated.Value(0.5))).current;
@@ -35,6 +50,83 @@ export default function Profil() {
     if (user) {
       loadIstatistik();
       loadStats();
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (isPremium) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(crownAnim, { toValue: 1.2, duration: 800, useNativeDriver: true }),
+          Animated.timing(crownAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        ])
+      ).start();
+    }
+  }, [isPremium]);
+
+  const liderlikYukle = useCallback(async () => {
+    if (!user) return;
+    setLiderlikYukleniyor(true);
+    try {
+      const supabase = getSupabaseClient();
+      const buAy = new Date();
+      const ayStr = `${buAy.getFullYear()}-${String(buAy.getMonth() + 1).padStart(2, '0')}`;
+
+      // Bu ayki soru_gecmisi verilerini sırala
+      const buAyBaslangic = new Date(buAy.getFullYear(), buAy.getMonth(), 1).toISOString();
+      const { data: gecmisData } = await supabase
+        .from('soru_gecmisi')
+        .select('user_id, dogru')
+        .gte('created_at', buAyBaslangic);
+
+      if (!gecmisData) return;
+
+      // user_id bazlı gruplama
+      const gruplar: Record<string, { dogru: number; toplam: number }> = {};
+      for (const row of gecmisData) {
+        if (!gruplar[row.user_id]) gruplar[row.user_id] = { dogru: 0, toplam: 0 };
+        gruplar[row.user_id].toplam += 1;
+        if (row.dogru) gruplar[row.user_id].dogru += 1;
+      }
+
+      const userIds = Object.keys(gruplar);
+      if (userIds.length === 0) { setLiderlikYukleniyor(false); return; }
+
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, username, email')
+        .in('id', userIds);
+
+      const { data: statsData } = await supabase
+        .from('user_stats')
+        .select('user_id, xp')
+        .in('user_id', userIds);
+
+      const profileMap: Record<string, string> = {};
+      profiles?.forEach(p => { profileMap[p.id] = p.username || p.email?.split('@')[0] || 'Kullanici'; });
+
+      const xpMap: Record<string, number> = {};
+      statsData?.forEach(s => { xpMap[s.user_id] = s.xp; });
+
+      const sirali = Object.entries(gruplar)
+        .map(([uid, v]) => ({
+          user_id: uid,
+          ad: profileMap[uid] || 'Kullanici',
+          xp: xpMap[uid] || 0,
+          soru_sayisi: v.toplam,
+          sira: 0,
+        }))
+        .sort((a, b) => b.soru_sayisi - a.soru_sayisi)
+        .slice(0, 10)
+        .map((item, i) => ({ ...item, sira: i + 1 }));
+
+      setLiderlikVerisi(sirali);
+      const benim = sirali.find(s => s.user_id === user.id);
+      setBenimLiderlikSiram(benim?.sira ?? null);
+    } catch (e) {
+      console.error('Liderlik yukleme hatasi:', e);
+    } finally {
+      setLiderlikYukleniyor(false);
     }
   }, [user]);
 
@@ -142,7 +234,14 @@ export default function Profil() {
   }
 
   const adHarf = (user.email || 'K').charAt(0).toUpperCase();
-  const displayAd = user.username || user.email?.split('@')[0] || 'Kullanıcı';
+  const displayAd = user.username || user.email?.split('@')[0] || 'Kullanici';
+
+  // Aylık liderlik ay string
+  const buAyLabel = (() => {
+    const d = new Date();
+    const aylar = ['Ocak','Subat','Mart','Nisan','Mayis','Haziran','Temmuz','Agustos','Eylul','Ekim','Kasim','Aralik'];
+    return `${aylar[d.getMonth()]} ${d.getFullYear()}`;
+  })();
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -159,9 +258,9 @@ export default function Profil() {
           <View style={styles.kullaniciAdRow}>
             <Text style={styles.kullaniciAd}>{displayAd}</Text>
             {isPremium && (
-              <View style={styles.premiumUserBadge}>
+              <Animated.View style={[styles.premiumUserBadge, { transform: [{ scale: crownAnim }] }]}>
                 <Text style={styles.premiumUserBadgeText}>👑 PRO</Text>
-              </View>
+              </Animated.View>
             )}
           </View>
           <Text style={styles.kullaniciEmail}>{user.email}</Text>
@@ -202,6 +301,115 @@ export default function Profil() {
             </View>
           </View>
         </View>
+
+        {/* Aylık Liderlik Kartı */}
+        <Pressable
+          style={({ pressed }) => [styles.liderlikKart, pressed && { opacity: 0.9 }]}
+          onPress={() => { liderlikYukle(); setLiderlikModal(true); }}
+        >
+          <View style={styles.liderlikSol}>
+            <Text style={styles.liderlikEmoji}>🏆</Text>
+            <View>
+              <Text style={styles.liderlikBaslik}>Aylık Liderlik</Text>
+              <Text style={styles.liderlikAlt}>{buAyLabel} • Ödüllü yarışma</Text>
+            </View>
+          </View>
+          <View style={styles.liderlikSag}>
+            {benimLiderlikSiram !== null && benimLiderlikSiram <= 3 ? (
+              <View style={[styles.liderlikSiraBadge, { backgroundColor: ODUL_AYLAR[benimLiderlikSiram].renk + '25' }]}>
+                <Text style={styles.liderlikSiraEmoji}>{ODUL_AYLAR[benimLiderlikSiram].emoji}</Text>
+                <Text style={[styles.liderlikSiraText, { color: ODUL_AYLAR[benimLiderlikSiram].renk }]}>
+                  {benimLiderlikSiram}. Sira!
+                </Text>
+              </View>
+            ) : benimLiderlikSiram !== null ? (
+              <Text style={styles.liderlikSiraNormal}>{benimLiderlikSiram}. sira</Text>
+            ) : (
+              <MaterialIcons name="chevron-right" size={20} color={Colors.gold} />
+            )}
+          </View>
+        </Pressable>
+
+        {/* Aylık Liderlik Modalı */}
+        <Modal visible={liderlikModal} transparent animationType="slide" onRequestClose={() => setLiderlikModal(false)}>
+          <Pressable style={liderlikStyles.overlay} onPress={() => setLiderlikModal(false)}>
+            <Pressable style={liderlikStyles.sheet} onPress={() => {}}>
+              <View style={liderlikStyles.handle} />
+              <View style={liderlikStyles.header}>
+                <Text style={liderlikStyles.baslik}>🏆 Aylık Liderlik</Text>
+                <Pressable onPress={() => setLiderlikModal(false)} hitSlop={12}>
+                  <MaterialIcons name="close" size={22} color={Colors.textMuted} />
+                </Pressable>
+              </View>
+              <Text style={liderlikStyles.altBaslik}>{buAyLabel} • En çok soru çözenler</Text>
+
+              {/* Ödül bilgisi */}
+              <View style={liderlikStyles.odulRow}>
+                {[1, 2, 3].map(sira => (
+                  <View key={sira} style={liderlikStyles.odulItem}>
+                    <Text style={liderlikStyles.odulEmoji}>{ODUL_AYLAR[sira].emoji}</Text>
+                    <Text style={liderlikStyles.odulAd}>{ODUL_AYLAR[sira].label}</Text>
+                    <Text style={[liderlikStyles.odulAciklama, { color: ODUL_AYLAR[sira].renk }]}>Ucretsiz</Text>
+                  </View>
+                ))}
+              </View>
+
+              {liderlikYukleniyor ? (
+                <ActivityIndicator color={Colors.primary} style={{ marginVertical: 24 }} />
+              ) : liderlikVerisi.length === 0 ? (
+                <View style={liderlikStyles.bosHal}>
+                  <MaterialIcons name="leaderboard" size={40} color={Colors.textMuted} />
+                  <Text style={liderlikStyles.bosText}>Bu ay henuz soru cozulmedi</Text>
+                </View>
+              ) : (
+                <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+                  {liderlikVerisi.map((item) => {
+                    const odul = ODUL_AYLAR[item.sira];
+                    const benBu = item.user_id === user.id;
+                    return (
+                      <View key={item.user_id} style={[
+                        liderlikStyles.satir,
+                        benBu && liderlikStyles.benimSatir,
+                      ]}>
+                        <View style={liderlikStyles.siraWrap}>
+                          {odul
+                            ? <Text style={{ fontSize: 18 }}>{odul.emoji}</Text>
+                            : <Text style={liderlikStyles.siraNo}>{item.sira}</Text>}
+                        </View>
+                        <View style={liderlikStyles.kisiWrap}>
+                          <View style={[liderlikStyles.avatar, benBu && liderlikStyles.benimAvatar]}>
+                            <Text style={liderlikStyles.avatarText}>{item.ad.charAt(0).toUpperCase()}</Text>
+                          </View>
+                          <View>
+                            <Text style={[liderlikStyles.ad, benBu && { color: Colors.primary }]}>
+                              {item.ad}{benBu ? ' (Sen)' : ''}
+                            </Text>
+                            {odul && (
+                              <Text style={[liderlikStyles.odulKazanText, { color: odul.renk }]}>
+                                {odul.label} odulu
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+                        <View style={liderlikStyles.soruWrap}>
+                          <Text style={liderlikStyles.soruSayi}>{item.soru_sayisi}</Text>
+                          <Text style={liderlikStyles.soruLabel}>soru</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              )}
+
+              <View style={liderlikStyles.notWrap}>
+                <MaterialIcons name="info-outline" size={13} color={Colors.textMuted} />
+                <Text style={liderlikStyles.notText}>
+                  Ay sonu ilk 3 kisi ucretsiz premium kazanir. Her ay sifirlanir.
+                </Text>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         {/* Bir Sonraki Rozet Hedefi */}
         <View style={styles.sonrakiRozetKart}>
@@ -405,6 +613,24 @@ const styles = StyleSheet.create({
     width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.success,
     alignItems: 'center', justifyContent: 'center',
   },
+  // Aylık Liderlik
+  liderlikKart: {
+    marginHorizontal: Spacing.md, backgroundColor: Colors.gold + '12', borderRadius: Radius.xl,
+    padding: Spacing.md, borderWidth: 1.5, borderColor: Colors.gold + '40', marginBottom: Spacing.md,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  liderlikSol: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  liderlikEmoji: { fontSize: 26 },
+  liderlikBaslik: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.gold },
+  liderlikAlt: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  liderlikSag: { alignItems: 'flex-end' },
+  liderlikSiraBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderRadius: Radius.full, paddingHorizontal: 10, paddingVertical: 5,
+  },
+  liderlikSiraEmoji: { fontSize: 14 },
+  liderlikSiraText: { fontSize: FontSize.xs, fontWeight: FontWeight.extrabold },
+  liderlikSiraNormal: { fontSize: FontSize.xs, color: Colors.textSecondary },
   premiumBolum: { paddingHorizontal: Spacing.md, marginBottom: Spacing.lg },
   premiumBanner: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.gold + '18',
@@ -434,4 +660,59 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.error + '40', gap: Spacing.sm, marginBottom: Spacing.md,
   },
   cikisBtnText: { fontSize: FontSize.base, fontWeight: FontWeight.semibold, color: Colors.error },
+});
+
+
+const liderlikStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: Colors.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: Spacing.md, paddingBottom: Spacing.xl,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: Spacing.md },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  baslik: { fontSize: FontSize.lg, fontWeight: FontWeight.extrabold, color: Colors.textPrimary },
+  altBaslik: { fontSize: FontSize.xs, color: Colors.textMuted, marginBottom: Spacing.md },
+  odulRow: {
+    flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md,
+    backgroundColor: Colors.bgSurface, borderRadius: Radius.lg, padding: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  odulItem: { flex: 1, alignItems: 'center', gap: 3 },
+  odulEmoji: { fontSize: 22 },
+  odulAd: { fontSize: 9, fontWeight: FontWeight.bold, color: Colors.textPrimary, textAlign: 'center' },
+  odulAciklama: { fontSize: 9, fontWeight: FontWeight.semibold },
+  bosHal: { alignItems: 'center', paddingVertical: Spacing.xl, gap: Spacing.sm },
+  bosText: { fontSize: FontSize.sm, color: Colors.textMuted },
+  satir: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 11,
+    borderTopWidth: 1, borderTopColor: Colors.border + '60', gap: Spacing.sm,
+  },
+  benimSatir: {
+    backgroundColor: Colors.primary + '10', borderRadius: Radius.md,
+    paddingHorizontal: Spacing.sm, borderTopWidth: 0, marginTop: 4,
+    borderWidth: 1, borderColor: Colors.primary + '25',
+  },
+  siraWrap: { width: 32, alignItems: 'center' },
+  siraNo: { fontSize: FontSize.base, fontWeight: FontWeight.bold, color: Colors.textMuted },
+  kisiWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  avatar: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: Colors.bgSurface, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  benimAvatar: { backgroundColor: Colors.primary + '20', borderColor: Colors.primary + '50' },
+  avatarText: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  ad: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.textSecondary },
+  odulKazanText: { fontSize: 9, fontWeight: FontWeight.bold, marginTop: 1 },
+  soruWrap: { alignItems: 'center' },
+  soruSayi: { fontSize: FontSize.lg, fontWeight: FontWeight.extrabold, color: Colors.textPrimary },
+  soruLabel: { fontSize: 9, color: Colors.textMuted },
+  notWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    marginTop: Spacing.md, paddingTop: Spacing.sm,
+    borderTopWidth: 1, borderTopColor: Colors.border,
+  },
+  notText: { fontSize: FontSize.xs, color: Colors.textMuted, flex: 1 },
 });

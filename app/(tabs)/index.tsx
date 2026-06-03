@@ -853,7 +853,7 @@ export default function AnaSayfa() {
         {isPremium ? (
           <Pressable
             style={({ pressed }) => [styles.yusSoruBtn, pressed && { opacity: 0.85 }]}
-            onPress={() => router.push({ pathname: '/soru', params: { kategoriId: 'turkce', mod: 'premium', soru_sayisi: '100' } })}
+            onPress={() => router.push({ pathname: '/soru', params: { kategoriId: 'turkce', mod: 'premium', soru_sayisi: '120' } })}
           >
             <Text style={styles.yusSoruEmoji}>💯</Text>
             <View style={styles.ozelTestIcerik}>
