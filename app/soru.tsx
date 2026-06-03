@@ -82,8 +82,6 @@ function PaylasBtnu({ sorular, userId, isPremium }: { sorular: SoruAI[]; userId:
       </Pressable>
     );
   }
-  const [paylasiliyor, setPaylasiliyor] = useState(false);
-  const [paylasildi, setPaylasildi] = useState(false);
 
   const handlePaylas = async () => {
     if (paylasiliyor || paylasildi) return;
