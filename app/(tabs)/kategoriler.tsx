@@ -183,11 +183,13 @@ function KonuModal({
   ders,
   onKapat,
   onKonuSec,
+  onKonuSoruCoz,
 }: {
   gorünür: boolean;
   ders: DersKonular | null;
   onKapat: () => void;
   onKonuSec: (konu: KonuItem, ders: DersKonular) => void;
+  onKonuSoruCoz: (konu: KonuItem, ders: DersKonular) => void;
 }) {
   const slideAnim = useRef(new Animated.Value(600)).current;
 
@@ -248,16 +250,28 @@ function KonuModal({
                     i > 0 && konuModalStyles.konuItemBorder,
                     pressed && { backgroundColor: ders.renk + '10', opacity: 0.9 },
                   ]}
-                  onPress={() => onKonuSec(konu, ders)}
+                  onPress={() => {}}
                 >
                   <View style={[konuModalStyles.konuNo, { backgroundColor: ders.renk + '15', borderColor: ders.renk + '30' }]}>
                     <Text style={[konuModalStyles.konuNoText, { color: ders.renk }]}>{i + 1}</Text>
                   </View>
                   <Text style={konuModalStyles.konuEmoji}>{konu.emoji}</Text>
                   <Text style={konuModalStyles.konuAd}>{konu.ad}</Text>
-                  <View style={[konuModalStyles.aiChip, { backgroundColor: ders.renk + '12', borderColor: ders.renk + '30' }]}>
-                    <MaterialIcons name="auto-awesome" size={11} color={ders.renk} />
-                    <Text style={[konuModalStyles.aiChipText, { color: ders.renk }]}>AI Anlat</Text>
+                  <View style={konuModalStyles.konuAksiyonlar}>
+                    <Pressable
+                      style={[konuModalStyles.aiChip, { backgroundColor: ders.renk + '12', borderColor: ders.renk + '30' }]}
+                      onPress={() => onKonuSec(konu, ders)}
+                    >
+                      <MaterialIcons name="auto-awesome" size={11} color={ders.renk} />
+                      <Text style={[konuModalStyles.aiChipText, { color: ders.renk }]}>AI Anlat</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[konuModalStyles.soruChip, { backgroundColor: Colors.success + '12', borderColor: Colors.success + '30' }]}
+                      onPress={() => onKonuSoruCoz(konu, ders)}
+                    >
+                      <MaterialIcons name="quiz" size={11} color={Colors.success} />
+                      <Text style={[konuModalStyles.aiChipText, { color: Colors.success }]}>Soru Çöz</Text>
+                    </Pressable>
                   </View>
                 </Pressable>
               ))}
@@ -321,7 +335,13 @@ const konuModalStyles = StyleSheet.create({
   konuNoText: { fontSize: FontSize.xs, fontWeight: FontWeight.extrabold },
   konuEmoji: { fontSize: 18, width: 24, textAlign: 'center' },
   konuAd: { flex: 1, fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.textPrimary, lineHeight: 20 },
+  konuAksiyonlar: { flexDirection: 'row', gap: 5, alignItems: 'center' },
   aiChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 4,
+    borderWidth: 1,
+  },
+  soruChip: {
     flexDirection: 'row', alignItems: 'center', gap: 3,
     borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 4,
     borderWidth: 1,
@@ -451,6 +471,18 @@ export default function Kategoriler() {
       router.push({
         pathname: '/konu-anlatim',
         params: { konuAd: konu.ad, ders: ders.dersAd },
+      });
+    }, 300);
+  };
+
+  const handleKonuSoruCoz = (konu: KonuItem, ders: DersKonular) => {
+    setModalAcik(false);
+    const kategori = KATEGORILER.find(k => k.ders === ders.dersAd || k.id === ders.dersId);
+    const kategoriId = kategori?.id ?? ders.dersId;
+    setTimeout(() => {
+      router.push({
+        pathname: '/soru',
+        params: { kategoriId, konuAd: konu.ad, mod: 'konu' },
       });
     }, 300);
   };
@@ -630,6 +662,7 @@ export default function Kategoriler() {
         ders={seciliDers}
         onKapat={() => setModalAcik(false)}
         onKonuSec={handleKonuSec}
+        onKonuSoruCoz={handleKonuSoruCoz}
       />
     </SafeAreaView>
   );
